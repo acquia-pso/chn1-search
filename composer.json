@@ -1,0 +1,7 @@
+{
+    "name": "chn/yext-app",
+    "description": "This package provides yext search support in CHN.",
+    "type": "project",
+    "minimum-stability": "dev",
+    "require": {}
+}

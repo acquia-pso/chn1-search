@@ -3,3 +3,6 @@ dist/
 storybook-static/
 .yarn/install-state.gz
 .yarn/unplugged/
+
+/vendor/
+/composer.lock
