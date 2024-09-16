@@ -1,4 +1,4 @@
-import { LitElement, html, noChange, TemplateResult } from 'lit';
+import { LitElement, html, TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
 
@@ -49,7 +49,7 @@ export class OutlineYextVertical extends LitElement {
   // debug: null;
 
   @state()
-  totalCount?: null | number;
+  totalCount: number | null = null;
 
   taskValue: unknown;
 
@@ -63,8 +63,17 @@ export class OutlineYextVertical extends LitElement {
     this.searchSettings = {
       ...getStoredSearchSettings(),
       limit: 16,
+      offset: 0,
     };
     setStoredSearchSettings(this.searchSettings);
+    this.totalCount = null;
+    this.fetchEndpoint.run();
+  }
+
+  updated(changedProperties: Map<PropertyKey, unknown>) {
+    if (changedProperties.has('verticalKey')) {
+      this.initializeSearchSettings();
+    }
   }
 
   /**
@@ -92,6 +101,12 @@ export class OutlineYextVertical extends LitElement {
       this.searchSettings.offset = offset;
       setStoredSearchSettings(this.searchSettings);
       this.fetchEndpoint.run();
+
+      // Scroll to top after updating the page
+      window.scrollTo({
+        top: 0,
+        behavior: 'smooth',
+      });
     }
   }
 
@@ -121,11 +136,11 @@ export class OutlineYextVertical extends LitElement {
         )}
       </ul>
       <outline-yext-pager
-        current-page=${this.searchSettings.offset /
-          (this.searchSettings.limit ?? 0) +
+        current-page=${(this.searchSettings?.offset ?? 0) /
+          (this.searchSettings?.limit ?? 1) +
         1}
         total-pages=${Math.ceil(
-          this.totalCount / (this.searchSettings.limit ?? 0)
+          (this.totalCount ?? 0) / (this.searchSettings?.limit ?? 1)
         )}
         @click=${(e: Event) => this.handlePageChange(e)}
         aria-live="polite"
@@ -144,33 +159,10 @@ export class OutlineYextVertical extends LitElement {
     `;
   }
 
-  setTotalCount() {
-    this.fetchEndpoint.render({
-      pending: () => (this.taskValue ? Pending() : noChange),
-      complete: data => {
-        if (!data) {
-          return;
-        }
-
-        if (!isVerticalSearchResponse(data.response)) {
-          return;
-        }
-
-        this.totalCount = data.response.resultsCount;
-      },
-    });
-  }
-
   render(): TemplateResult {
     if (!this.searchSettings) {
       return html``;
     }
-
-    if (this.fetchEndpoint.value !== undefined) {
-      this.taskValue = this.fetchEndpoint.value;
-    }
-
-    this.setTotalCount();
 
     const classes = {
       wrapper: true,
@@ -181,13 +173,8 @@ export class OutlineYextVertical extends LitElement {
       <div>
         <div class="${classMap(classes)}">
           <main>
-            ${TotalCount({
-              totalCount: this.totalCount ?? null,
-              limit: this.searchSettings.limit,
-              offset: this.searchSettings.offset,
-            })}
             ${this.fetchEndpoint.render({
-              pending: () => (this.taskValue ? Pending() : noChange),
+              pending: () => Pending(),
               complete: data => {
                 if (!data) {
                   return;
@@ -197,7 +184,16 @@ export class OutlineYextVertical extends LitElement {
                   return;
                 }
 
-                return this.displayAll(data.response);
+                this.totalCount = data.response.resultsCount;
+
+                return html`
+                  ${TotalCount({
+                    totalCount: this.totalCount,
+                    limit: this.searchSettings?.limit ?? null,
+                    offset: this.searchSettings?.offset ?? 0,
+                  })}
+                  ${this.displayAll(data.response)}
+                `;
               },
             })}
           </main>

@@ -1,111 +1,81 @@
 import { html } from 'lit';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-
 import {
   Address,
   HighlightedField,
   verticalSearchResult,
 } from '../outline-yext-universal/outline-yext-types';
 import '../shared/outline-button/outline-button';
-
 import '../shared/outline-teaser/outline-teaser';
 
 export function displayTeaser(vertical: string, result: verticalSearchResult) {
-  const cleanData = result.highlightedFields.s_snippet
-    ? highlightText(result.highlightedFields.s_snippet)
-    : result.data.s_snippet;
+  const highlightField = (field: string) =>
+    result.highlightedFields[field]
+      ? highlightText(result.highlightedFields[field])
+      : result.data[field];
 
-  // Get provider's landing page if c_url does not exist
+  const cleanData = highlightField('s_snippet');
+  const title = highlightField('name');
+
   const url = result.data.c_url
     ? `https://www.ecommunity.com${result.data.c_url}`
     : result.data.landingPageUrl;
 
-  // If name (teaser's title) has highlighted text, display it. Otherwise display plain name string
-  const title = result.highlightedFields.name
-    ? highlightText(result.highlightedFields.name)
-    : result.data.name;
-
-  switch (vertical) {
-    case 'healthcare_professionals': {
-      const { c_specialties, headshot } = result.data;
-      return healthcareProfessionalTeaser(
-        headshot?.url,
+  const teaserFunctions = {
+    healthcare_professionals: () =>
+      healthcareProfessionalTeaser(
+        result.data.headshot?.url,
         title,
         url,
-        c_specialties || []
-      );
-    }
-
-    case 'testimonial': {
-      const { c_testimonial_Photo } = result.data;
-      return testimonialTeaser(c_testimonial_Photo, title, url, cleanData);
-    }
-
-    case 'person': {
-      return defaultTeaser(title, url, result.data.c_title);
-    }
-
-    case 'page': {
-      // Highlight the title if it exists in the highlightedFields
-      const highlightedTitle = result.highlightedFields.c_title
-        ? highlightText(result.highlightedFields.c_title)
-        : result.data.c_title;
-
-      return defaultTeaser(highlightedTitle, url, cleanData);
-    }
-
-    case 'locationsearch': {
-      const {
-        address,
-        c_locationHoursAndFax,
-        c_googleMapLocations,
-        c_phoneSearch,
-      } = result.data;
-      return locationTeaser(
+        result.data.c_specialties?.map(highlightField) || []
+      ),
+    testimonial: () =>
+      testimonialTeaser(result.data.c_testimonial_Photo, title, url, cleanData),
+    person: () => defaultTeaser(title, url, highlightField('c_title')),
+    page: () => defaultTeaser(highlightField('c_title'), url, cleanData),
+    locationsearch: () =>
+      locationTeaser(
         title,
         url,
-        address,
-        c_phoneSearch,
+        result.data.address,
+        result.data.c_phoneSearch,
         '',
-        c_locationHoursAndFax,
-        c_googleMapLocations
-      );
-    }
-
-    case 'news': {
-      const { c_authorCreatedDate, c_author } = result.data;
-      return newsTeaser(
+        result.data.c_locationHoursAndFax,
+        result.data.c_googleMapLocations
+      ),
+    news: () =>
+      newsTeaser(
         `News | ${title}`,
         url,
         cleanData,
-        c_author ? c_author : '',
-        c_authorCreatedDate
-      );
-    }
+        result.data.c_author || '',
+        result.data.c_authorCreatedDate
+      ),
+  };
 
-    default: {
-      // Handle cases where no specific vertical is matched
-      let prefix: string = '';
+  return (
+    teaserFunctions[vertical as keyof typeof teaserFunctions]?.() ||
+    defaultTeaser(
+      getTeaserTitle(vertical, title, result.data.c_url),
+      url,
+      cleanData
+    )
+  );
+}
 
-      switch (vertical) {
-        case 'careers_area':
-          prefix = `Careers`;
-          break;
-        case 'procedure':
-          prefix = getCategoryFromURL(result.data.c_url);
-          break;
-        case 'careers_page':
-          prefix = `Careers at Community`;
-          break;
-        default:
-          prefix = '';
-      }
+function getTeaserTitle(
+  vertical: string,
+  title: string,
+  url: string | undefined
+): string {
+  const prefixes = {
+    careers_area: 'Careers',
+    procedure: getCategoryFromURL(url || ''),
+    careers_page: 'Careers at Community',
+  };
 
-      // Combine prefix and title for display
-      const teaserTitle = `${prefix === '' ? '' : `${prefix} | `} ${title}`;
-      return defaultTeaser(teaserTitle, url, cleanData);
-    }
-  }
+  const prefix = prefixes[vertical as keyof typeof prefixes] || '';
+  return prefix ? `${prefix} | ${title}` : title;
 }
 
 export function defaultTeaser(title: string, url: string, snippet: string) {
@@ -113,8 +83,7 @@ export function defaultTeaser(title: string, url: string, snippet: string) {
     url="${url}"
     title="${title}"
     snippet="${snippet}"
-  >
-  </outline-teaser>`;
+  ></outline-teaser>`;
 }
 
 export function newsTeaser(
@@ -130,8 +99,7 @@ export function newsTeaser(
     snippet="${snippet}"
     author="${author}"
     date="${date}"
-  >
-  </outline-teaser>`;
+  ></outline-teaser>`;
 }
 
 export function healthcareProfessionalTeaser(
@@ -142,7 +110,7 @@ export function healthcareProfessionalTeaser(
 ) {
   return html`
     <outline-teaser image="${image}" title="${title}" url="${url}">
-      ${specialties?.length > 0
+      ${specialties.length > 0
         ? html`
             <ul class="specialty-list">
               ${specialties.map(
@@ -173,8 +141,7 @@ export function testimonialTeaser(
       subtitle="Patient Testimonial"
       snippet="${snippet}"
       url="${url}"
-    >
-    </outline-teaser>
+    ></outline-teaser>
   `;
 }
 
@@ -222,43 +189,25 @@ function getCategoryFromURL(url: string): string {
 
 function highlightText(content: HighlightedField): string {
   if (!content.matchedSubstrings || content.matchedSubstrings.length === 0) {
-    return content.value; // No matches, return original content
+    return content.value;
   }
 
   const sortedMatches = content.matchedSubstrings.sort(
     (a, b) => a.offset - b.offset
   );
   let highlightedText = '';
-  let inTag = false;
-  let inAttribute = false;
+  let lastIndex = 0;
 
-  for (let i = 0; i < content.value.length; i++) {
-    if (content.value[i] === '<') {
-      inTag = true;
-    } else if (content.value[i] === '>') {
-      inTag = false;
-      inAttribute = false;
-    } else if (inTag && content.value[i] === '"') {
-      inAttribute = !inAttribute;
-    }
+  for (const match of sortedMatches) {
+    const startIndex = match.offset;
+    const endIndex = startIndex + match.length;
 
-    if (sortedMatches.length > 0 && i === sortedMatches[0].offset) {
-      if (!inTag && !inAttribute) {
-        const match = sortedMatches.shift();
-        if (match) {
-          const end = match.offset + match.length;
-          highlightedText += `<span class="highlight">${content.value.substring(i, end)}</span>`;
-          i = end - 1; // Skip ahead to the end of the match
-          continue;
-        }
-      } else {
-        // Skip highlighting this match as it's within a tag or attribute
-        sortedMatches.shift();
-      }
-    }
-
-    highlightedText += content.value[i];
+    highlightedText += content.value.substring(lastIndex, startIndex);
+    highlightedText += `<span class="highlight">${content.value.substring(startIndex, endIndex)}</span>`;
+    lastIndex = endIndex;
   }
+
+  highlightedText += content.value.substring(lastIndex);
 
   return highlightedText;
 }

@@ -49,9 +49,8 @@ ul.pager-items {
   cursor: pointer;
 }
 
-.pager-item a:focus,
 .pager-item a:focus-visible {
-  outline-offset: -2px;
+  outline: 2px solid black;
 }
 
 .pager-item--current,
