@@ -20,6 +20,9 @@ export class OutlineTeaser extends LitElement {
 
   resizeController = new ResizeController(this, {});
 
+  @property({ type: Boolean })
+  noImageFallback = false;
+
   @property({ type: String, attribute: 'image' })
   teaserImage?: string;
 
