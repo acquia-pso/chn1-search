@@ -19,7 +19,7 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
 
   const url = result.data.c_url
     ? `https://www.ecommunity.com${result.data.c_url}`
-    : result.data.landingPageUrl;
+    : result.data.websiteUrl?.url || '';
 
   const teaserFunctions = {
     healthcare_professionals: () =>
