@@ -373,6 +373,8 @@ export class OutlineYextEntities extends LitElement {
       case 'healthcareFacility':
       case 'location':
         return entity.photoGallery?.[0]?.image?.url || '';
+      case 'ce_person':
+        return entity.c_person_Photos || '';
       default:
         return '';
     }
