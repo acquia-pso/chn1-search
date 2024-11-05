@@ -300,11 +300,13 @@ export class OutlineYextEntities extends LitElement {
         );
 
         return html`
-          <p>Displaying ${start}-${end} out of ${this.totalCount} results</p>
-          ${this.debug
-            ? this.renderDebugView(data)
-            : this.renderNormalView(data)}
-          ${this.renderPager()}
+        <div class="wrapper">
+            <p>Displaying ${start}-${end} out of ${this.totalCount} results</p>
+            ${this.debug
+              ? this.renderDebugView(data)
+              : this.renderNormalView(data)}
+            ${this.renderPager()}
+        </div>
         `;
       },
       error: (error: unknown) =>

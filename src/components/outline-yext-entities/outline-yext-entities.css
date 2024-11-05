@@ -1,3 +1,9 @@
+.wrapper {
+  max-width: 1170px;
+  margin: 1.25rem auto;
+  padding: 0 1rem;
+}
+
 .entity-type-selector {
   display: flex;
   justify-content: center;
@@ -15,11 +21,11 @@
 }
 
 .entity-type-selector a:hover {
-  background-color: #e0e0e0;
+  background-color: #3791c4;
 }
 
 .entity-type-selector a.active {
-  background-color: #007bff;
+  background-color: #2f83b3;
   color: white;
 }
 
@@ -33,9 +39,9 @@
 .pager-link {
   margin: 0 2px;
   padding: 5px 10px;
-  border: 1px solid #007bff;
+  border: 1px solid var(--c-brand-orange-200);
   border-radius: 3px;
-  color: #007bff;
+  color: var(--c-brand-orange-200);
   text-decoration: none;
   transition:
     background-color 0.3s ease,
@@ -43,12 +49,12 @@
 }
 
 .pager-link:hover:not(.disabled) {
-  background-color: #007bff;
+  background-color: var(--c-brand-orange-200);
   color: white;
 }
 
 .pager-link.active {
-  background-color: #007bff;
+  background-color: var(--c-brand-orange-200);
   color: white;
   cursor: default;
 }
