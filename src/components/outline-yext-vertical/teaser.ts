@@ -16,6 +16,8 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
 
   const cleanDataUnformatted = highlightField('s_snippet');
   const cleanData = (cleanDataUnformatted ?? '').replace(/\·\·\·/g, ' ');
+  const startDate = highlightField('c_classes_events_start_date');
+  const date = startDate ? formatDate(startDate) :  startDate
   const title = highlightField('name');
 
   const url = result.data.c_url
@@ -52,6 +54,8 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
         result.data.c_author || '',
         result.data.c_authorCreatedDate
       ),
+    'classes-and-events': () =>
+      defaultTeaser( startDate ? `${title} | ${date}` : title, url, cleanData),
   };
 
   return (
@@ -211,4 +215,17 @@ function highlightText(content: HighlightedField): string {
   highlightedText += content.value.substring(lastIndex);
 
   return highlightedText;
+}
+
+function formatDate(dateString: string): string {
+  const date = new Date(dateString);
+  const options: Intl.DateTimeFormatOptions = {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: true,
+  };
+  return new Intl.DateTimeFormat('en-US', options).format(date);
 }
