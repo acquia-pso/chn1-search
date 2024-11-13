@@ -30,7 +30,7 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
         result.data.headshot?.url,
         title,
         url,
-        result.data.c_specialties?.map(highlightField) || []
+        highlightField('c_specialties') || []
       ),
     testimonial: () =>
       testimonialTeaser(result.data.c_testimonial_Photo, title, url, cleanData),
