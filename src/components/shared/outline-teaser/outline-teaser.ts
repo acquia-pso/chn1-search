@@ -140,12 +140,13 @@ export class OutlineTeaser extends LitElement {
             : html`<slot></slot>`}
           ${this.locationInformationTemplate()}
           ${this.teaserHours
-            ? html`
-                <div class="hours">
-                  <h4>Hours</h4>
-                  ${unsafeHTML(this.teaserHours)}
-                </div>
-              `
+            ? null
+            // html`
+            //     <div class="hours">
+            //       <h4>Hours</h4>
+            //       ${unsafeHTML(this.teaserHours)}
+            //     </div>
+            //   `
             : null}
           ${this.hasCtaSlot
             ? html`
