@@ -14,7 +14,8 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
       ? highlightText(result.highlightedFields[field])
       : result.data[field];
 
-  const cleanData = highlightField('s_snippet');
+  const cleanDataUnformatted = highlightField('s_snippet');
+  const cleanData = (cleanDataUnformatted ?? '').replace(/\·\·\·/g, ' ');
   const title = highlightField('name');
 
   const url = result.data.c_url
