@@ -122,7 +122,7 @@ export function healthcareProfessionalTeaser(
       <outline-button
         slot="cta"
         button-url="${url}"
-        button-title="Request an appointment from profile"
+        button-title="Request Appointment"
       ></outline-button>
     </outline-teaser>
   `;
