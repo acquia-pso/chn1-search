@@ -227,7 +227,7 @@ export class OutlineYextUniversal extends LitElement {
       'healthcare_professionals': 'Healthcare Professional',
       'locationsearch': 'Location',
       'news': 'News',
-      'page': 'Page',
+      'page': 'Other',
       'person': 'Person',
       'procedure': 'Procedure',
       'service': 'Health Service',
