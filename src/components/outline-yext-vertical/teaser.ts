@@ -143,7 +143,6 @@ export function testimonialTeaser(
     <outline-teaser
       image="${image}"
       title="${title}"
-      subtitle="Patient Testimonial"
       snippet="${snippet}"
       url="${url}"
     ></outline-teaser>
