@@ -72,13 +72,13 @@ export class OutlineTeaser extends LitElement {
               `
             : null}
           ${this.teaserPhone
-            ? html`<a href="tel:${this.teaserPhone}" class="phone"
+            ? html`<a href="tel:${this.teaserPhone}" class="phone" title=""
                 >${this.teaserPhone}</a
               >`
             : null}
           ${this.teaserFax ? html` <p class="fax">${this.teaserFax}</p>` : null}
           ${this.teaserDirectionsUrl
-            ? html` <a class="directions" href="${this.teaserDirectionsUrl}">
+            ? html` <a class="directions" title="" href="${this.teaserDirectionsUrl}">
                 Get directions
               </a>`
             : null}
@@ -110,7 +110,7 @@ export class OutlineTeaser extends LitElement {
 
       <div class="content">
         <h3 class="title">
-          <a href="${this.teaserUrl}">${unsafeHTML(this.teaserTitle)}</a>
+          <a href="${this.teaserUrl}" title="">${unsafeHTML(this.teaserTitle)}</a>
         </h3>
 
         ${this.teaserAuthor || this.teaserDate
@@ -140,12 +140,13 @@ export class OutlineTeaser extends LitElement {
             : html`<slot></slot>`}
           ${this.locationInformationTemplate()}
           ${this.teaserHours
-            ? html`
-                <div class="hours">
-                  <h4>Hours</h4>
-                  ${unsafeHTML(this.teaserHours)}
-                </div>
-              `
+            ? null
+            // html`
+            //     <div class="hours">
+            //       <h4>Hours</h4>
+            //       ${unsafeHTML(this.teaserHours)}
+            //     </div>
+            //   `
             : null}
           ${this.hasCtaSlot
             ? html`
