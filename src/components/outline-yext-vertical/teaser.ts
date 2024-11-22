@@ -35,7 +35,7 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
       ),
     testimonial: () =>
       testimonialTeaser(result.data.c_testimonial_Photo, title, url, cleanData),
-    person: () => personTeaser(result.data.c_person_Photos, title, url, highlightField('c_title')),
+    person: () => personTeaser(result.data.c_person_Photos, title, url, highlightField('c_title'), cleanData),
     page: () => defaultTeaser(highlightField('c_title'), url, cleanData),
     locationsearch: () =>
       locationTeaser(
@@ -92,10 +92,11 @@ export function defaultTeaser(title: string, url: string, snippet: string) {
   ></outline-teaser>`;
 }
 
-export function personTeaser(image: string, title: string, url: string, snippet: string) {
+export function personTeaser(image: string, title: string, url: string, subtitle: string, snippet: string) {
   return html`<outline-teaser
     url="${url}"
     title="${title}"
+    subtitle="${subtitle}"
     image="${image}"
     snippet="${snippet}"
   ></outline-teaser>`;

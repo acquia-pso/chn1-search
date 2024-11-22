@@ -134,7 +134,7 @@ export class OutlineTeaser extends LitElement {
             `
           : null}
         ${this.teaserSubtitle
-          ? html` <div class="subtitle">${this.teaserSubtitle}</div> `
+          ? html` <div class="subtitle">${unsafeHTML(this.teaserSubtitle)}</div> `
           : null}
 
         <div
