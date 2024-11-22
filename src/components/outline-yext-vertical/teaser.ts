@@ -24,6 +24,7 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
   const teaserFunctions = {
     healthcare_professionals: () =>
       healthcareProfessionalTeaser(
+        result.data.address,
         result.data.headshot?.url,
         title,
         url,
@@ -103,13 +104,14 @@ export function newsTeaser(
 }
 
 export function healthcareProfessionalTeaser(
+  address: Address | undefined,
   image: string | undefined,
   title: string,
   url: string,
   specialties: string[]
 ) {
   return html`
-    <outline-teaser image="${image}" title="${title}" url="${url}">
+    <outline-teaser teaser-type="healthcare_professional" image="${image}" title="${title}" url="${url}">
     ${specialties.length > 0
       ? html`
           <ul class="specialty-list">
@@ -121,6 +123,14 @@ export function healthcareProfessionalTeaser(
           </ul>
         `
       : null}
+      ${address
+        ? unsafeHTML(`
+      <div slot="address">
+        ${address.line1}<br />
+        ${address.city}, ${address.region} ${address.postalCode}<br />
+      </div>
+      `)
+        : null}
       <outline-button
         slot="cta"
         button-url="${url}"
