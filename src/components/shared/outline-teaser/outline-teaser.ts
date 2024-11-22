@@ -143,6 +143,7 @@ export class OutlineTeaser extends LitElement {
             'has-hours': this.teaserHours,
             'is-mobile': isMobile,
           })}"
+          title=""
         >
           ${this.teaserSnippet
             ? html`${unsafeHTML(this.teaserSnippet)}`
