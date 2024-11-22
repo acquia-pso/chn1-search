@@ -27,7 +27,7 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
         result.data.headshot?.url,
         title,
         url,
-        result.data.c_specialties?.map(highlightField) || []
+        result.data["c_specialties"] || [],
       ),
     testimonial: () =>
       testimonialTeaser(result.data.c_testimonial_Photo, title, url, cleanData),
@@ -110,15 +110,17 @@ export function healthcareProfessionalTeaser(
 ) {
   return html`
     <outline-teaser image="${image}" title="${title}" url="${url}">
-      ${specialties.length > 0
-        ? html`
-            <ul class="specialty-list">
-              ${specialties.map(
-                (el: string) => html`<li class="specialty">${el}</li>`
-              )}
-            </ul>
-          `
-        : null}
+    ${specialties.length > 0
+      ? html`
+          <ul class="specialty-list">
+          <li class="specialty">
+            ${specialties.map((el: string, index: number) => html`
+              ${el}${index < specialties.length - 1 ? ',' : ''}
+            `)}
+            </li>
+          </ul>
+        `
+      : null}
       <outline-button
         slot="cta"
         button-url="${url}"
