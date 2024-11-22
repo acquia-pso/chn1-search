@@ -66,9 +66,9 @@ export class OutlineYextEntities extends LitElement {
       ],
     },
     {
-      id: 'ce_location',
+      id: 'location',
       name: 'Location',
-      fields: ['name', 'address', 'mainPhone', 'hours'],
+      fields: ['name', 'address', 'mainPhone', 'hours', 'photoGallery'],
     },
     {
       id: 'healthcareFacility',
@@ -337,6 +337,7 @@ export class OutlineYextEntities extends LitElement {
           <outline-teaser
             image="${this.getEntityImage(entity)}"
             title="${entity.name ?? 'Unnamed Entity'}"
+            subtitle="${this.getSubtitle(entity)}"
             url="${this.getEntityUrl(entity)}"
             phone="${entity.mainPhone || ''}"
             fax="${entity.fax || ''}"
@@ -354,6 +355,15 @@ export class OutlineYextEntities extends LitElement {
       )}
     `;
   }
+  private getSubtitle(entity: YextEntity): string {
+    const entityType = this.entityTypes[this.currentEntityType].id;
+    if (entityType === 'healthcareProfessional') {
+      return (Array.isArray(entity.c_specialties)
+        ? entity.c_specialties.join(', ')
+        : entity.c_specialties || '').toString();
+    }
+    return '';
+  }
 
   private getEntityImage(entity: YextEntity): string {
     const entityType = this.entityTypes[this.currentEntityType].id;
@@ -361,8 +371,10 @@ export class OutlineYextEntities extends LitElement {
       case 'healthcareProfessional':
         return entity.headshot?.url || '';
       case 'healthcareFacility':
-      case 'ce_location':
+      case 'location':
         return entity.photoGallery?.[0]?.image?.url || '';
+      case 'ce_person':
+        return entity.c_person_Photos || '';
       default:
         return '';
     }
@@ -404,9 +416,8 @@ export class OutlineYextEntities extends LitElement {
     let url: string | undefined;
     switch (entityType) {
       case 'healthcareFacility':
-        url = entity.c_baseURL as string | undefined;
-        break;
       case 'healthcareProfessional':
+      case 'location':
         if (typeof entity.websiteUrl === 'string') {
           url = entity.websiteUrl;
         } else if (

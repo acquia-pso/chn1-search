@@ -14,12 +14,15 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
       ? highlightText(result.highlightedFields[field])
       : result.data[field];
 
-  const cleanData = highlightField('s_snippet');
+  const cleanDataUnformatted = highlightField('s_snippet');
+  const cleanData = (cleanDataUnformatted ?? '').replace(/\·\·\·/g, ' ');
+  const startDate = highlightField('c_classes_events_start_date');
+  const date = startDate ? formatDate(startDate) :  startDate
   const title = highlightField('name');
 
   const url = result.data.c_url
     ? `https://www.ecommunity.com${result.data.c_url}`
-    : result.data.landingPageUrl;
+    : result.data.websiteUrl?.url || '';
 
   const teaserFunctions = {
     healthcare_professionals: () =>
@@ -32,7 +35,7 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
       ),
     testimonial: () =>
       testimonialTeaser(result.data.c_testimonial_Photo, title, url, cleanData),
-    person: () => defaultTeaser(title, url, highlightField('c_title')),
+    person: () => personTeaser(result.data.c_person_Photos, title, url, highlightField('c_title')),
     page: () => defaultTeaser(highlightField('c_title'), url, cleanData),
     locationsearch: () =>
       locationTeaser(
@@ -52,6 +55,8 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
         result.data.c_author || '',
         result.data.c_authorCreatedDate
       ),
+    'classes-and-events': () =>
+      defaultTeaser( startDate ? `${title} | ${date}` : title, url, cleanData),
   };
 
   return (
@@ -83,6 +88,15 @@ export function defaultTeaser(title: string, url: string, snippet: string) {
   return html`<outline-teaser
     url="${url}"
     title="${title}"
+    snippet="${snippet}"
+  ></outline-teaser>`;
+}
+
+export function personTeaser(image: string, title: string, url: string, snippet: string) {
+  return html`<outline-teaser
+    url="${url}"
+    title="${title}"
+    image="${image}"
     snippet="${snippet}"
   ></outline-teaser>`;
 }
@@ -134,7 +148,7 @@ export function healthcareProfessionalTeaser(
       <outline-button
         slot="cta"
         button-url="${url}"
-        button-title="Request an appointment from profile"
+        button-title="Request Appointment"
       ></outline-button>
     </outline-teaser>
   `;
@@ -150,7 +164,6 @@ export function testimonialTeaser(
     <outline-teaser
       image="${image}"
       title="${title}"
-      subtitle="Patient Testimonial"
       snippet="${snippet}"
       url="${url}"
     ></outline-teaser>
@@ -222,4 +235,17 @@ function highlightText(content: HighlightedField): string {
   highlightedText += content.value.substring(lastIndex);
 
   return highlightedText;
+}
+
+function formatDate(dateString: string): string {
+  const date = new Date(dateString);
+  const options: Intl.DateTimeFormatOptions = {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: true,
+  };
+  return new Intl.DateTimeFormat('en-US', options).format(date);
 }
