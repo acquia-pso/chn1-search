@@ -56,6 +56,9 @@ export class OutlineTeaser extends LitElement {
   @property({ type: String, attribute: 'date' })
   teaserDate?: string;
 
+  @property({ type: String, attribute: 'teaser-type' })
+  teaserType?: string;
+
   @state() hasAddressSlot?: boolean;
   @state() hasCtaSlot?: boolean;
 
@@ -64,12 +67,18 @@ export class OutlineTeaser extends LitElement {
       <div class="location-information">
         <div class="inner">
           ${this.hasAddressSlot
-            ? html`
-                <h4>Location</h4>
-                <div class="address">
-                  <slot name="address"></slot>
-                </div>
-              `
+            ? this.teaserType != 'healthcare_professional'
+              ? html`
+                  <h4>Location</h4>
+                  <div class="address">
+                    <slot name="address"></slot>
+                  </div>
+                `
+              : html`
+                  <div class="address address-padding-top">
+                    <slot name="address"></slot>
+                  </div>
+                `
             : null}
           ${this.teaserPhone
             ? html`<a href="tel:${this.teaserPhone}" class="phone" title=""
@@ -125,7 +134,7 @@ export class OutlineTeaser extends LitElement {
             `
           : null}
         ${this.teaserSubtitle
-          ? html` <div class="subtitle">${this.teaserSubtitle}</div> `
+          ? html` <div class="subtitle">${unsafeHTML(this.teaserSubtitle)}</div> `
           : null}
 
         <div
@@ -134,6 +143,7 @@ export class OutlineTeaser extends LitElement {
             'has-hours': this.teaserHours,
             'is-mobile': isMobile,
           })}"
+          title=""
         >
           ${this.teaserSnippet
             ? html`${unsafeHTML(this.teaserSnippet)}`

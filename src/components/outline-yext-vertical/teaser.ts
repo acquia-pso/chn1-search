@@ -27,14 +27,15 @@ export function displayTeaser(vertical: string, result: verticalSearchResult) {
   const teaserFunctions = {
     healthcare_professionals: () =>
       healthcareProfessionalTeaser(
+        result.data.address,
         result.data.headshot?.url,
         title,
         url,
-        highlightField('c_specialties') || []
+        result.data["c_specialties"] || [],
       ),
     testimonial: () =>
       testimonialTeaser(result.data.c_testimonial_Photo, title, url, cleanData),
-    person: () => personTeaser(result.data.c_person_Photos, title, url, highlightField('c_title')),
+    person: () => personTeaser(result.data.c_person_Photos, title, url, highlightField('c_title'), cleanData),
     page: () => defaultTeaser(highlightField('c_title'), url, cleanData),
     locationsearch: () =>
       locationTeaser(
@@ -91,10 +92,11 @@ export function defaultTeaser(title: string, url: string, snippet: string) {
   ></outline-teaser>`;
 }
 
-export function personTeaser(image: string, title: string, url: string, snippet: string) {
+export function personTeaser(image: string, title: string, url: string, subtitle: string, snippet: string) {
   return html`<outline-teaser
     url="${url}"
     title="${title}"
+    subtitle="${subtitle}"
     image="${image}"
     snippet="${snippet}"
   ></outline-teaser>`;
@@ -117,21 +119,32 @@ export function newsTeaser(
 }
 
 export function healthcareProfessionalTeaser(
+  address: Address | undefined,
   image: string | undefined,
   title: string,
   url: string,
   specialties: string[]
 ) {
   return html`
-    <outline-teaser image="${image}" title="${title}" url="${url}">
-      ${specialties.length > 0
-        ? html`
-            <ul class="specialty-list">
-              ${specialties.map(
-                (el: string) => html`<li class="specialty">${el}</li>`
-              )}
-            </ul>
-          `
+    <outline-teaser teaser-type="healthcare_professional" image="${image}" title="${title}" url="${url}">
+    ${specialties.length > 0
+      ? html`
+          <ul class="specialty-list">
+          <li class="specialty">
+            ${specialties.map((el: string, index: number) => html`
+              ${el}${index < specialties.length - 1 ? ',' : ''}
+            `)}
+            </li>
+          </ul>
+        `
+      : null}
+      ${address
+        ? unsafeHTML(`
+      <div slot="address">
+        ${address.line1}<br />
+        ${address.city}, ${address.region} ${address.postalCode}<br />
+      </div>
+      `)
         : null}
       <outline-button
         slot="cta"
