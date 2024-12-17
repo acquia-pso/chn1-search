@@ -76,21 +76,84 @@ export class OutlineYextUniversal extends LitElement {
 
   private fetchEndpoint = new Task(
     this,
-    async () => getYextSearchData(),
+    async () => {
+      if(!this.searchSettings?.input){
+        return undefined
+      }
+      return getYextSearchData()
+    },
     () => []
   );
 
+  // Add default sortBys
+  private defaultSortBys = [{type: 'RELEVANCE'}];
+
   connectedCallback() {
     super.connectedCallback();
+    window.addEventListener('popstate', this.handlePopState);
+    // This overrides replace state and is necessary for back button browser navigation
+    window.history.replaceState = function (...args: any[]) {
+    };
+    this.initializeFromUrl();
     this.initializeSearchSettings();
+  }
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener('popstate', this.handlePopState);
+  }
+
+  private initializeFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+
+    // Parse and set active vertical
+    const activeVertical = params.get('yext_activeVertical');
+    if (activeVertical) {
+      this.activeVertical = activeVertical;
+    }
+    else{
+      this.activeVertical = 'all'
+    }
+
+    // Initialize searchSettings with defaults first
+    this.searchSettings = {
+      ...defaultSearchSettings,
+      sortBys: this.defaultSortBys,
+      activeVertical: this.activeVertical
+    };
+
+    // Parse other URL parameters
+    const input = params.get('yext_input');
+    if (input && this.searchSettings) {
+      this.searchSettings.input = input;
+    }
+    // Since we are not running a search we need to cause a re render
+    else{
+      this.searchSettings.input = ''    
+      this.requestUpdate()
+    }
+
+    const retrieveFacets = params.get('yext_retrieveFacets');
+    if (retrieveFacets && this.searchSettings) {
+      this.searchSettings.retrieveFacets = retrieveFacets === 'true';
+    }
+
+    const sortBys = params.get('yext_sortBys');
+    if (sortBys && this.searchSettings) {
+      try {
+        // Parse the sortBys parameter directly without decoding
+        this.searchSettings.sortBys = JSON.parse(sortBys);
+      } catch (e) {
+        console.warn('Failed to parse sortBys from URL, using defaults:', e);
+        this.searchSettings.sortBys = this.defaultSortBys;
+      }
+    }
+
   }
 
   private initializeSearchSettings() {
     syncSearchSettingsInStore();
     this.searchSettings = {
       ...getStoredSearchSettings(),
-      limit: null,
-      activeVertical: 'all',
     };
     setStoredSearchSettings(this.searchSettings);
     this.displayResults = this.searchSettings.input !== '';
@@ -139,6 +202,31 @@ export class OutlineYextUniversal extends LitElement {
     this.requestUpdate();
   }
 
+    private updateUrlWithSearchParams() {
+    const params = new URLSearchParams();
+
+    if (this.searchSettings?.input) {
+      params.set('yext_input', this.searchSettings.input);
+    }
+
+    if (this.activeVertical !== 'all') {
+      params.set('yext_activeVertical', this.activeVertical);
+    }
+
+    if (this.searchSettings?.retrieveFacets) {
+      params.set('yext_retrieveFacets', String(this.searchSettings.retrieveFacets));
+    }
+
+    if (this.searchSettings?.sortBys) {
+      // Store sortBys as a plain JSON string without additional encoding
+      const sortBysString = JSON.stringify(this.searchSettings.sortBys);
+      params.set('yext_sortBys', sortBysString);
+    }
+
+    const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
+    window.history.pushState({ path: newUrl }, '', newUrl);
+  }
+
   private search(e: Event) {
     e.preventDefault();
     this.suggestionsIsOpen = false;
@@ -158,6 +246,9 @@ export class OutlineYextUniversal extends LitElement {
 
     this.activeVertical = 'all';
     this.displayResults = this.searchSettings.input !== '';
+    
+    // Update URL before fetching results
+    this.updateUrlWithSearchParams();
 
     this.fetchEndpoint.run().then(() => {
       this.isSearching = false;
@@ -166,7 +257,8 @@ export class OutlineYextUniversal extends LitElement {
 
   private handleSuggestion(suggestion: Result) {
     if (!this.searchSettings) return;
-
+    
+    this.activeVertical = 'all'
     this.searchSettings = {
       ...this.searchSettings,
       input: suggestion.value,
@@ -174,6 +266,10 @@ export class OutlineYextUniversal extends LitElement {
     setStoredSearchSettings(this.searchSettings);
 
     this.displayResults = true;
+
+    // Update URL before fetching results
+    this.updateUrlWithSearchParams();
+
     this.fetchEndpoint.run();
     this.suggestionsIsOpen = false;
   }
@@ -201,10 +297,14 @@ export class OutlineYextUniversal extends LitElement {
       ...this.searchSettings,
       offset: 0,
       activeVertical: vertical,
+      sortBys: this.defaultSortBys
     };
     setStoredSearchSettings(this.searchSettings);
 
     this.dropdownVerticalsOpen = false;
+
+    // Update URL before fetching results
+    this.updateUrlWithSearchParams();
 
     if (vertical !== 'all') {
       this.shadowRoot
@@ -511,6 +611,20 @@ export class OutlineYextUniversal extends LitElement {
         : ``}
     `;
   }
+
+  private handlePopState = () => {
+    try {
+      this.initializeFromUrl();      
+      this.fetchEndpoint.run();
+    } catch (error) {
+      console.warn('Error handling browser navigation:', error);
+      this.searchSettings = {
+        ...defaultSearchSettings,
+        sortBys: this.defaultSortBys
+      };
+      this.activeVertical = 'all';
+    }
+  };
 
   render(): TemplateResult {
     if (this.fetchEndpoint.value !== undefined) {

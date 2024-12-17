@@ -26,6 +26,8 @@ const getDynamicSearchParams = () => {
   return dynamicParams;
 };
 
+let lastUrl = '';
+
 const setDynamicSearchParams = (dynamicParams: URLSearchParams) => {
   // Get the current URL and its search parameters
   const url = new URL(window.location.href);
@@ -47,7 +49,13 @@ const setDynamicSearchParams = (dynamicParams: URLSearchParams) => {
   url.search = searchParams.toString();
 
   // Update the browser URL
-  window.history.replaceState(null, '', url.toString());
+  const newUrl = url.toString();
+
+  // Only update the history if the URL has changed
+  if (newUrl !== lastUrl) {
+    window.history.replaceState(null, '', newUrl);
+    lastUrl = newUrl;
+  }
 };
 
 export const getStoredSearchSettings = () => {
