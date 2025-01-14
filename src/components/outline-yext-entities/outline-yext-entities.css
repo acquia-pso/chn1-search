@@ -58,3 +58,7 @@
   color: #ccc;
   cursor: not-allowed;
 }
+
+.space-between-teasers {
+  padding-bottom: 1.5rem;
+}
