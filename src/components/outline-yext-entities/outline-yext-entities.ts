@@ -342,6 +342,7 @@ export class OutlineYextEntities extends LitElement {
             phone="${entity.mainPhone || ''}"
             fax="${entity.fax || ''}"
             directions-url="${entity.googleMapUrl || ''}"
+            hours="${this.formatHours(entity.hours as Hours)}"
             .noImageFallback=${true}
           >
             <div slot="address">
