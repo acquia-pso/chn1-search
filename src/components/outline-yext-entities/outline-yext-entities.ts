@@ -334,6 +334,7 @@ export class OutlineYextEntities extends LitElement {
     return html`
       ${data.response.entities.map(
         (entity: YextEntity) => html`
+        <div class="space-between-teasers">
           <outline-teaser
             image="${this.getEntityImage(entity)}"
             title="${entity.name ?? 'Unnamed Entity'}"
@@ -351,6 +352,7 @@ export class OutlineYextEntities extends LitElement {
               ${entity.address?.postalCode || ''}
             </div>
           </outline-teaser>
+        </div>
         `
       )}
     `;
