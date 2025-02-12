@@ -41,3 +41,14 @@ export {
   OutlineYextVertical,
   OutlineYextEntities,
 };
+
+// Import and export components
+import './components/outline-yext-universal/outline-yext-universal';
+import './components/outline-yext-vertical/outline-yext-vertical';
+
+// Re-export store for external usage
+export { yextStore } from './libraries/data-access-yext/yext-store';
+export type {
+  SearchSettings,
+  StoreSubscriber,
+} from './libraries/data-access-yext/yext-store';

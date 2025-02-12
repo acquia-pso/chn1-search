@@ -1,101 +1,253 @@
-import { SearchSettings } from './yext-types';
+/**
+ * Types for the Yext search store
+ */
+export interface SearchSettings {
+  input: string;
+  vertical?: string;
+  page?: number;
+  limit?: number;
+  offset?: number;
+  filters?: Record<string, unknown>;
+  facetFilters?: Record<string, unknown>;
+  sortBys?: Array<{ type: string }>;
+  retrieveFacets?: boolean;
+}
 
-// We use the URL query parameters as a store. We could use something else later such as local storage or Redux, so the URL store is abstracted from getting and setting the search settings.
+export interface StoreSubscriber {
+  onStateChange: (settings: SearchSettings) => void;
+}
 
+/**
+ * Default search settings
+ */
 export const defaultSearchSettings: SearchSettings = {
   input: '',
+  vertical: 'all',
+  page: 1,
+  limit: 16,
   offset: 0,
-  limit: null,
-  filters: {}, // @todo, this is required, but the values have not been tested.
-  facetFilters: {}, // @todo this has not been tested.
+  filters: {},
+  facetFilters: {},
   sortBys: [{ type: 'RELEVANCE' }],
+  retrieveFacets: true,
 };
 
-const getDynamicSearchParams = () => {
-  const url = new URL(window.location.href);
-  const searchParams = new URLSearchParams(url.search);
+/**
+ * YextStore - Manages application state through URL parameters
+ * Implements publisher-subscriber pattern for state changes
+ */
+export class YextStore {
+  private subscribers: Set<StoreSubscriber> = new Set();
+  private currentSettings: SearchSettings;
 
-  const dynamicParams = new URLSearchParams();
+  constructor() {
+    this.currentSettings = this.getSettingsFromUrl();
+    this.setupHistoryListener();
+  }
 
-  for (const key of searchParams.keys()) {
-    if (key.startsWith('yext_')) {
-      dynamicParams.set(key.replace('yext_', ''), searchParams.get(key) || '');
+  /**
+   * Subscribe to state changes
+   * @param subscriber - Component that wants to receive state updates
+   */
+  subscribe(subscriber: StoreSubscriber): void {
+    this.subscribers.add(subscriber);
+    // Immediately notify new subscriber of current state
+    subscriber.onStateChange(this.currentSettings);
+  }
+
+  /**
+   * Unsubscribe from state changes
+   * @param subscriber - Component to unsubscribe
+   */
+  unsubscribe(subscriber: StoreSubscriber): void {
+    this.subscribers.delete(subscriber);
+  }
+
+  /**
+   * Update search settings and notify subscribers
+   * @param settings - Partial settings to update
+   */
+  updateSettings(settings: Partial<SearchSettings>): void {
+    // Reset page to 1 and clear offset when vertical changes
+    if (
+      settings.vertical &&
+      settings.vertical !== this.currentSettings.vertical
+    ) {
+      settings.page = 1;
+      settings.offset = 0;
+    }
+
+    this.currentSettings = {
+      ...this.currentSettings,
+      ...settings,
+    };
+
+    this.updateUrl();
+    this.notifySubscribers();
+  }
+
+  /**
+   * Get current search settings
+   */
+  getSettings(): SearchSettings {
+    return { ...this.currentSettings };
+  }
+
+  /**
+   * Parse settings from URL parameters
+   */
+  private getSettingsFromUrl(): SearchSettings {
+    const params = new URLSearchParams(window.location.search);
+    const settings: SearchSettings = { ...defaultSearchSettings };
+
+    // Parse each parameter with yext_ prefix
+    for (const [key, value] of params.entries()) {
+      if (key.startsWith('yext_')) {
+        const settingKey = key.replace('yext_', '');
+
+        // Skip if not a valid setting key
+        if (!this.isValidSettingKey(settingKey)) continue;
+
+        try {
+          // Try to parse as JSON for complex values
+          const parsedValue = JSON.parse(value);
+          this.processSettingValue(settings, settingKey, parsedValue);
+        } catch {
+          // Use raw value if not JSON
+          this.processSettingValue(settings, settingKey, value);
+        }
+      }
+    }
+
+    return settings;
+  }
+
+  /**
+   * Check if the key is a valid setting key
+   */
+  private isValidSettingKey(key: string): key is keyof SearchSettings {
+    return [
+      'input',
+      'vertical',
+      'page',
+      'limit',
+      'offset',
+      'filters',
+      'facetFilters',
+      'sortBys',
+      'retrieveFacets',
+    ].includes(key);
+  }
+
+  /**
+   * Process and validate a setting value
+   */
+  private processSettingValue(
+    settings: SearchSettings,
+    key: keyof SearchSettings,
+    value: unknown
+  ): void {
+    let numValue: number;
+    let offsetValue: number;
+
+    switch (key) {
+      case 'input':
+      case 'vertical':
+        if (typeof value === 'string') {
+          settings[key] = value;
+        }
+        break;
+      case 'page':
+      case 'limit':
+        numValue =
+          typeof value === 'string' ? Number(value) : (value as number);
+        if (typeof numValue === 'number' && !isNaN(numValue)) {
+          settings[key] = numValue;
+        }
+        break;
+      case 'offset':
+        if (typeof value === 'string') {
+          offsetValue = Number(value);
+          if (!isNaN(offsetValue)) {
+            settings[key] = offsetValue;
+          }
+        }
+        break;
+      case 'filters':
+        if (value !== null && typeof value === 'object') {
+          settings.filters = value as Record<string, unknown>;
+        }
+        break;
+      case 'facetFilters':
+        if (value !== null && typeof value === 'object') {
+          settings.facetFilters = value as Record<string, unknown>;
+        }
+        break;
+      case 'sortBys':
+        if (value !== null && Array.isArray(value)) {
+          settings.sortBys = value as Array<{ type: string }>;
+        }
+        break;
+      case 'retrieveFacets':
+        if (typeof value === 'boolean') {
+          settings.retrieveFacets = value;
+        }
+        break;
     }
   }
 
-  return dynamicParams;
-};
+  /**
+   * Update URL with current settings
+   */
+  private updateUrl(): void {
+    const params = new URLSearchParams();
 
-let lastUrl = '';
+    // Add each setting to URL parameters
+    Object.entries(this.currentSettings).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        const paramValue =
+          typeof value === 'object' ? JSON.stringify(value) : String(value);
+        params.set(`yext_${key}`, paramValue);
+      }
+    });
 
-const setDynamicSearchParams = (dynamicParams: URLSearchParams) => {
-  // Get the current URL and its search parameters
-  const url = new URL(window.location.href);
-  const searchParams = new URLSearchParams(url.search);
-
-  // Remove all `yext_` parameters from the params object
-  for (const key of searchParams.keys()) {
-    if (key.startsWith('yext_')) {
-      searchParams.delete(key);
-    }
+    // Update URL without reloading page
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.pushState(
+      {
+        path: newUrl,
+        searchSettings: { ...this.currentSettings },
+      },
+      '',
+      newUrl
+    );
   }
 
-  // Update the search parameters with the new params
-  for (const [key, value] of dynamicParams.entries()) {
-    searchParams.set(`yext_${key}`, value);
+  /**
+   * Notify all subscribers of state change
+   */
+  private notifySubscribers(): void {
+    this.subscribers.forEach(subscriber => {
+      subscriber.onStateChange(this.currentSettings);
+    });
   }
 
-  // Replace the search parameters in the URL
-  url.search = searchParams.toString();
-
-  // Update the browser URL
-  const newUrl = url.toString();
-
-  // Only update the history if the URL has changed
-  if (newUrl !== lastUrl) {
-    window.history.replaceState(null, '', newUrl);
-    lastUrl = newUrl;
+  /**
+   * Setup browser history listener for back/forward navigation
+   */
+  private setupHistoryListener(): void {
+    window.addEventListener('popstate', event => {
+      // Try to get settings from state first
+      if (event.state?.searchSettings) {
+        this.currentSettings = event.state.searchSettings;
+      } else {
+        // Fallback to parsing from URL if state is not available
+        this.currentSettings = this.getSettingsFromUrl();
+      }
+      this.notifySubscribers();
+    });
   }
-};
+}
 
-export const getStoredSearchSettings = () => {
-  const queryParams = getDynamicSearchParams();
-
-  const searchSettings: SearchSettings = defaultSearchSettings;
-
-  for (const [key, value] of queryParams.entries()) {
-    searchSettings[key] = value || '';
-
-    // If value is a JSON string, parse it.
-    if (value.startsWith('[') || value.startsWith('{')) {
-      searchSettings[key] = JSON.parse(value);
-    }
-  }
-
-  return searchSettings;
-};
-
-export const setStoredSearchSettings = (searchSettings: SearchSettings) => {
-  const dynamicParams = new URLSearchParams();
-
-  for (const [key, value] of Object.entries(searchSettings)) {
-    if (value !== '' && value !== null) {
-      dynamicParams.set(
-        key,
-        typeof value === 'string' ? value : JSON.stringify(value)
-      );
-    } else {
-      dynamicParams.delete(key);
-    }
-  }
-
-  // Hard code setting to retrieve facets?
-  dynamicParams.set('retrieveFacets', 'true');
-
-  setDynamicSearchParams(dynamicParams);
-};
-
-export const syncSearchSettingsInStore = () => {
-  const searchSettings = getStoredSearchSettings();
-  setStoredSearchSettings(searchSettings);
-};
+// Export singleton instance
+export const yextStore = new YextStore();

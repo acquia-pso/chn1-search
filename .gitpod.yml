@@ -3,7 +3,9 @@ tasks:
       yarn
       time yarn build
       yarn start
-
+  - before: |
+      time yarn playwright install-deps
+      time yarn playwright install
 ports:
   - port: 6001
     visibility: public

@@ -1,148 +1,287 @@
-import { getStoredSearchSettings } from './yext-store';
-import {
-  ResponseSearchSuggestions,
-  UniversalSearchResponse,
-  VerticalSearchResponseStructure,
-} from './yext-types';
-
-import {
-  apiKey,
-  apiVersion,
-  accountId,
-  experienceKey,
-  locale,
-  urlHref,
-  version,
-} from './yext-config';
-
-// We chose to not use Search Core for now based on discussions with Yext.
-// That may be worth revisiting and may be a good replacement for this code.
-// See https://hitchhikers.yext.com/tracks/search-backend/search110-intro-to-search/03-ways-to-build-search/
-// See https://github.com/yext/search-core
-
-const startTime = performance.now();
-let lastFetchTime = 0;
-
-export interface YextSearchDataResponse {
-  meta: {};
-  response: UniversalSearchResponse | VerticalSearchResponseStructure;
-}
-
-export const isVerticalSearchResponse = (
-  response: UniversalSearchResponse | VerticalSearchResponseStructure
-): response is VerticalSearchResponseStructure => {
-  return 'modules' in response === false;
-};
+import { yextConfig } from './yext-config';
 
 /**
- * See https://hitchhikers.yext.com/docs/contentdeliveryapis/search/universalsearch
- * See https://hitchhikers.yext.com/docs/contentdeliveryapis/search/verticalsearch
+ * Types for Yext API responses
  */
-export const getYextSearchData: (config?: {
-  verticalKey?: string;
-}) => Promise<YextSearchDataResponse> = async ({ verticalKey } = {}) => {
-  const queryParams = new URLSearchParams();
+export interface YextResult {
+  id: string;
+  name: string;
+  type: string;
+  description?: string;
+  data: {
+    c_url?: string;
+    websiteUrl?: {
+      url: string;
+    };
+    address?: {
+      line1: string;
+      city: string;
+      region: string;
+      postalCode: string;
+    };
+    headshot?: {
+      url: string;
+    };
+    c_testimonial_Photo?: string;
+    c_person_Photos?: string;
+    c_specialties?: string[];
+    c_phoneSearch?: string;
+    c_locationHoursAndFax?: string;
+    c_googleMapLocations?: string;
+    c_author?: string;
+    c_authorCreatedDate?: string;
+    c_classes_events_start_date?: string;
+    c_title?: string;
+    s_snippet?: string;
+    [key: string]: unknown;
+  };
+  raw: Record<string, unknown>;
+  highlightedFields?: {
+    [key: string]: {
+      value: string;
+      matchedSubstrings: { offset: number; length: number }[];
+    };
+  };
+}
 
-  queryParams.set('v', apiVersion);
-  queryParams.set('api_key', apiKey);
-  queryParams.set('experienceKey', experienceKey);
-  queryParams.set('version', version);
-  queryParams.set('locale', locale);
+export interface YextMatchedSubstring {
+  offset: number;
+  length: number;
+}
 
-  if (verticalKey) {
-    queryParams.set('verticalKey', verticalKey ?? '');
+export interface YextSuggestion {
+  value: string;
+  verticalKeys: string[];
+  matchedSubstrings: YextMatchedSubstring[];
+}
+
+export interface YextAutocompleteResponse {
+  meta: {
+    uuid: string;
+    errors: Error[];
+  };
+  response: {
+    input: {
+      value: string;
+      queryIntents: Array<{
+        type: string;
+        confidence: number;
+      }>;
+    };
+    results: YextSuggestion[];
+  };
+}
+
+export interface YextVerticalResults {
+  verticalConfigId: string;
+  resultsCount: number;
+  results: YextResult[];
+  facets?: Array<{
+    fieldId: string;
+    displayName: string;
+    options: Array<{
+      displayName: string;
+      count: number;
+      selected: boolean;
+    }>;
+  }>;
+}
+
+export interface YextUniversalSearchResponse {
+  meta: {
+    uuid: string;
+    errors: Error[];
+  };
+  response: {
+    businessId: string;
+    queryId: string;
+    modules: YextVerticalResults[];
+    failedVerticals?: Array<{
+      verticalConfigId: string;
+      errorType: string;
+      details: {
+        responseCode: number;
+        description: string;
+      };
+      queryDurationMillis: number;
+    }>;
+    spellCheck?: {
+      originalQuery: string;
+      correctedQuery: {
+        value: string;
+        matchedSubstrings: YextMatchedSubstring[];
+      };
+      type: string;
+    };
+  };
+}
+
+export interface YextVerticalResponse {
+  meta: {
+    uuid: string;
+    errors: Error[];
+  };
+  response: {
+    businessId: string;
+    queryId: string;
+    resultsCount: number;
+    results: YextResult[];
+    facets?: Array<{
+      fieldId: string;
+      displayName: string;
+      options: Array<{
+        displayName: string;
+        count: number;
+        selected: boolean;
+      }>;
+    }>;
+  };
+}
+
+/**
+ * Yext API Service
+ */
+export class YextAPI {
+  private baseUrl: string;
+
+  constructor() {
+    this.baseUrl = this.getBaseUrl();
   }
 
-  const storedSearchSettings = getStoredSearchSettings();
-
-  if (!storedSearchSettings.input) {
-    throw new Error('No search input provided');
+  /**
+   * Get base URL for API calls
+   */
+  private getBaseUrl(): string {
+    return `${yextConfig.environment === 'sandbox' ? 'https://api.sandbox' : 'https://cdn'}.yextapis.com/v2/accounts/${yextConfig.businessId}`;
   }
 
-  Object.keys(storedSearchSettings).forEach(key => {
-    const value = storedSearchSettings[key];
+  /**
+   * Create API URL with parameters
+   */
+  private createUrl(endpoint: string, params: Record<string, string>): string {
+    const searchParams = new URLSearchParams({
+      api_key: yextConfig.apiKey,
+      v: yextConfig.apiVersion,
+      experienceKey: 'universal-search',
+      locale: 'en',
+      version: 'PRODUCTION',
+      ...params,
+    });
+    return `${this.baseUrl}${endpoint}?${searchParams.toString()}`;
+  }
 
-    if (!value) {
-      return;
+  /**
+   * Get search suggestions based on partial input
+   * This endpoint should be called after each keystroke
+   */
+  async getAutocomplete(input: string): Promise<YextAutocompleteResponse> {
+    const url = this.createUrl('/search/autocomplete', {
+      input: input,
+    });
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Yext API error: ${response.statusText}`);
     }
 
-    if (typeof value === 'object' || Array.isArray(value)) {
-      queryParams.set(key, JSON.stringify(value));
-    } else {
-      queryParams.set(key, value.toString());
+    return response.json();
+  }
+
+  /**
+   * Perform universal search across all verticals
+   */
+  async universalSearch(
+    query: string,
+    options?: {
+      limit?: Record<string, number>;
+      location?: string;
+      restrictVerticals?: string[];
+      skipSpellCheck?: boolean;
+      queryTrigger?: 'suggest' | 'initialize';
+      source?: string;
     }
-  });
+  ): Promise<YextUniversalSearchResponse> {
+    const params: Record<string, string> = {
+      input: query,
+    };
 
-  const jsonResponse =
-    verticalKey && verticalKey !== 'all'
-      ? getYextVerticalSearchData(queryParams)
-      : getYextUniversalSearchData(queryParams);
+    // Add optional parameters
+    if (options?.limit) {
+      params.limit = JSON.stringify(options.limit);
+    }
+    if (options?.location) {
+      params.location = options.location;
+    }
+    if (options?.restrictVerticals) {
+      params.restrictVerticals = options.restrictVerticals.join(',');
+    }
+    if (options?.skipSpellCheck) {
+      params.skipSpellCheck = 'true';
+    }
+    if (options?.queryTrigger) {
+      params.queryTrigger = options.queryTrigger;
+    }
+    if (options?.source) {
+      params.source = options.source;
+    }
 
-  // @todo why are we storing these times?
-  const endTime = performance.now();
-  lastFetchTime = (endTime - startTime) / 1000;
+    const url = this.createUrl('/search/query', params);
 
-  return jsonResponse;
-};
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Yext API error: ${response.statusText}`);
+    }
 
-// @todo for TS purposes? Can we combine these and still get useful types?
-const getYextUniversalSearchData = async (queryParams: URLSearchParams) => {
-  // Be extra careful not to include `limit` or we get errors.
-  queryParams.delete('limit');
-
-  const response = await fetch(
-    `${urlHref}/${accountId}/search/query?${queryParams.toString()}`,
-    {}
-  );
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch data');
+    return response.json();
   }
 
-  const jsonResponse: {
-    meta: {};
-    response: UniversalSearchResponse;
-  } = await response.json();
+  /**
+   * Perform vertical search within a specific vertical
+   */
+  async verticalSearch(
+    query: string,
+    verticalKey: string,
+    page: number = 1,
+    limit: number = 20,
+    filters?: Record<string, unknown>
+  ): Promise<YextVerticalResponse> {
+    const params: Record<string, string> = {
+      input: query,
+      verticalKey,
+      offset: String((page - 1) * limit),
+      limit: String(limit),
+    };
 
-  return jsonResponse;
-};
+    // Add filters if specified
+    if (filters) {
+      params.filters = JSON.stringify(filters);
+    }
 
-const getYextVerticalSearchData = async (queryParams: URLSearchParams) => {
-  const response = await fetch(
-    `${urlHref}/${accountId}/search/vertical/query?${queryParams.toString()}`,
-    {}
-  );
+    const url = this.createUrl('/search/vertical/query', params);
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch data');
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Yext API error: ${response.statusText}`);
+    }
+
+    return response.json();
   }
 
-  const jsonResponse: {
-    meta: {};
-    response: VerticalSearchResponseStructure;
-  } = await response.json();
+  /**
+   * Get available verticals
+   */
+  async getVerticals(): Promise<string[]> {
+    const url = this.createUrl('/verticals', {});
 
-  return jsonResponse;
-};
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Yext API error: ${response.statusText}`);
+    }
 
-// This has been minimally tested.
-// See https://hitchhikers.yext.com/docs/contentdeliveryapis/search/universalsearch.
-export const getYextSuggestions = async (input: string = '') => {
-  const params = new URLSearchParams();
-  params.set('api_key', apiKey);
-  params.set('experienceKey', experienceKey);
-  params.set('locale', locale);
-  params.set('input', `${input.toLocaleLowerCase()}`);
-
-  const response = await fetch(
-    `${urlHref}/${accountId}/search/autocomplete?v=${apiVersion}&${params.toString()}`
-  );
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch suggestions');
+    const data = await response.json();
+    return data.verticals || [];
   }
+}
 
-  const suggestions: ResponseSearchSuggestions = await response.json();
-
-  return suggestions;
-};
+// Export singleton instance
+export const yextAPI = new YextAPI();

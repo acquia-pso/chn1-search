@@ -56,6 +56,9 @@ export class OutlineTeaser extends LitElement {
   @property({ type: String, attribute: 'date' })
   teaserDate?: string;
 
+  @property({ type: Boolean, attribute: 'is-generative' })
+  isGenerative?: boolean;
+
   @property({ type: String, attribute: 'teaser-type' })
   teaserType?: string;
 
@@ -66,20 +69,7 @@ export class OutlineTeaser extends LitElement {
     return html`
       <div class="location-information">
         <div class="inner">
-          ${this.hasAddressSlot
-            ? this.teaserType != 'healthcare_professional'
-              ? html`
-                  <h4>Location</h4>
-                  <div class="address">
-                    <slot name="address"></slot>
-                  </div>
-                `
-              : html`
-                  <div class="address address-padding-top">
-                    <slot name="address"></slot>
-                  </div>
-                `
-            : null}
+          ${this.hasAddressSlot ? this.renderAddressContent() : ''}
           ${this.teaserPhone
             ? html`<a href="tel:${this.teaserPhone}" class="phone" title=""
                 >${this.teaserPhone}</a
@@ -87,7 +77,11 @@ export class OutlineTeaser extends LitElement {
             : null}
           ${this.teaserFax ? html` <p class="fax">${this.teaserFax}</p>` : null}
           ${this.teaserDirectionsUrl
-            ? html` <a class="directions" title="" href="${this.teaserDirectionsUrl}">
+            ? html` <a
+                class="directions"
+                href="${this.teaserDirectionsUrl}"
+                title=""
+              >
                 Get directions
               </a>`
             : null}
@@ -96,16 +90,32 @@ export class OutlineTeaser extends LitElement {
     `;
   }
 
+  private renderAddressContent(): TemplateResult {
+    if (this.teaserType !== 'healthcare_professional') {
+      return html`
+        <h4>Location</h4>
+        <div class="address">
+          <slot name="address"></slot>
+        </div>
+      `;
+    } else {
+      return html`
+        <div class="address address-padding-top">
+          <slot name="address"></slot>
+        </div>
+      `;
+    }
+  }
+
   render(): TemplateResult {
     this.hasAddressSlot = this.querySelector('[slot="address"]') !== null;
     this.hasCtaSlot = this.querySelector('[slot="cta"]') !== null;
-
     const isMobile = this.resizeController.currentBreakpointRange === 0;
 
     return html` <div
       class="${classMap({
         'teaser': true,
-        'has-image': this.teaserImage && this.teaserImage !== '',
+        'has-image': Boolean(this.teaserImage && this.teaserImage !== ''),
         'is-mobile': isMobile,
       })}"
     >
@@ -116,10 +126,11 @@ export class OutlineTeaser extends LitElement {
             </div>
           `
         : null}
-
       <div class="content">
-        <h3 class="title">
-          <a href="${this.teaserUrl}" title="">${unsafeHTML(this.teaserTitle)}</a>
+        <h3 class="title ${this.isGenerative ? 'is-generative' : ''}">
+          <a href="${this.teaserUrl}" title=""
+            >${unsafeHTML(this.teaserTitle)}</a
+          >
         </h3>
 
         ${this.teaserAuthor || this.teaserDate
@@ -134,13 +145,15 @@ export class OutlineTeaser extends LitElement {
             `
           : null}
         ${this.teaserSubtitle
-          ? html` <div class="subtitle">${unsafeHTML(this.teaserSubtitle)}</div> `
+          ? html`
+              <div class="subtitle">${unsafeHTML(this.teaserSubtitle)}</div>
+            `
           : null}
 
         <div
           class="${classMap({
             'body': true,
-            'has-hours': this.teaserHours,
+            'has-hours': Boolean(this.teaserHours),
             'is-mobile': isMobile,
           })}"
           title=""
@@ -151,13 +164,13 @@ export class OutlineTeaser extends LitElement {
           ${this.locationInformationTemplate()}
           ${this.teaserHours
             ? null
-            // html`
-            //     <div class="hours">
-            //       <h4>Hours</h4>
-            //       ${unsafeHTML(this.teaserHours)}
-            //     </div>
-            //   `
-            : null}
+            : // html`
+              //     <div class="hours">
+              //       <h4>Hours</h4>
+              //       ${unsafeHTML(this.teaserHours)}
+              //     </div>
+              //   `
+              null}
           ${this.hasCtaSlot
             ? html`
                 <div class="cta">

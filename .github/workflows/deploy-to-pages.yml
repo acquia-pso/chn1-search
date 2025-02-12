@@ -1,0 +1,48 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: self-hosted
+    container:
+      image: node:20
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      run: yarn install
+    
+    - name: Build with Vite
+      run: |
+          npx vite build
+      working-directory: .
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: github-pages
+        path: .
+
+  deploy:
+    needs: build
+    permissions:
+      pages: write
+      id-token: write  
+    runs-on: self-hosted
+    container:
+      image: node:20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

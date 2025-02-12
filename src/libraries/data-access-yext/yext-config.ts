@@ -1,6 +1,29 @@
-// Right now these are hard-coded, but they could be set dynamically.
+/**
+ * Yext API configuration
+ */
+export interface YextConfig {
+  apiKey: string;
+  businessId: string;
+  apiVersion: string;
+  environment: 'production' | 'sandbox';
+}
 
-// @todo is any of this different per component?
+/**
+ * Get configuration from environment variables or defaults
+ */
+export function getYextConfig(): YextConfig {
+  return {
+    apiKey: '0f3c031ce836961cf921558aca570af3',
+    businessId: 'me',
+    apiVersion: '20230406',
+    environment: 'production',
+  };
+}
+
+// Export singleton instance
+export const yextConfig = getYextConfig();
+
+// Additional configuration values used by existing components
 export const apiKey = '0f3c031ce836961cf921558aca570af3';
 export const apiVersion = '20230406';
 export const accountId = 'me';

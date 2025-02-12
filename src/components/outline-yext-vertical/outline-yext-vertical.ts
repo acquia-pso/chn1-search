@@ -1,210 +1,271 @@
-import { LitElement, html, TemplateResult } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
-import { repeat } from 'lit/directives/repeat.js';
-
-import { classMap } from 'lit/directives/class-map.js';
-// import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { Task } from '@lit/task';
-import { AdoptedStylesheets } from '@phase2/outline-adopted-stylesheets-controller';
-import componentStyles from './outline-yext-vertical.css?inline';
-import { ResizeController } from '../../controllers/resize-controller';
-import '../outline-yext-pager/outline-yext-pager';
-import { displayTeaser } from './teaser';
-
-import type {
-  SearchSettings,
-  VerticalSearchResponseStructure,
-} from '../../libraries/data-access-yext/yext-types';
-
+import { LitElement, html, unsafeCSS } from 'lit';
+import { property, state } from 'lit/decorators.js';
 import {
-  getStoredSearchSettings,
-  syncSearchSettingsInStore,
-  setStoredSearchSettings,
-} from '../../libraries/data-access-yext/yext-store';
-import {
-  getYextSearchData,
-  isVerticalSearchResponse,
+  yextAPI,
+  type YextResult,
 } from '../../libraries/data-access-yext/yext-api';
-import TotalCount from '../../libraries/ui-yext/total-count';
-import Pending from '../../libraries/ui-yext/pending';
+import { yextStore } from '../../libraries/data-access-yext/yext-store';
+import { displayTeaser } from './teaser';
+import '../shared/outline-teaser/outline-teaser';
+import '../outline-yext-pager/outline-yext-pager';
+import { NoResultsMessage } from '../../libraries/ui-yext/no-results-message';
+import componentStyles from './outline-yext-vertical.css?inline';
+import { customElement } from 'lit/decorators.js';
 
-/**
- * The Yext Vertical Search component.
- * @element outline-yext-universal
- */
-@customElement('outline-yext-vertical')
+interface MatchedSubstring {
+  offset: number;
+  length: number;
+}
+
 export class OutlineYextVertical extends LitElement {
-  createRenderRoot() {
-    const root = super.createRenderRoot();
-    new AdoptedStylesheets(this, componentStyles, this.shadowRoot!);
-    return root;
-  }
+  @state() private currentPage = 1;
+  @state() private currentQuery = '';
+  @state() private currentVertical = '';
+  @state() private results: YextResult[] = [];
+  @state() private totalResults = 0;
+  @state() private isError = false;
+  @state() private errorMessage = '';
+  @state() private isLoading = false;
 
-  searchSettings: SearchSettings | undefined;
+  private readonly itemsPerPage = 16;
 
-  @property({ type: String, attribute: 'vertical-key' })
-  verticalKey = 'blog';
-
-  // @property({ type: Boolean, reflect: true, attribute: 'debug' })
-  // debug: null;
-
-  @state()
-  totalCount: number | null = null;
-
-  taskValue: unknown;
-
-  connectedCallback() {
-    super.connectedCallback();
-    this.initializeSearchSettings();
-  }
-
-  initializeSearchSettings() {
-    syncSearchSettingsInStore();
-    this.searchSettings = {
-      ...getStoredSearchSettings(),
-      limit: 16,
-      offset: 0,
-    };
-    setStoredSearchSettings(this.searchSettings);
-    this.totalCount = null;
-    this.fetchEndpoint.run();
-  }
-
-  updated(changedProperties: Map<PropertyKey, unknown>) {
-    if (changedProperties.has('verticalKey')) {
-      this.initializeSearchSettings();
-    }
-  }
+  static styles = unsafeCSS(componentStyles);
 
   /**
-   * Handles a page change event, updating the data offset and triggering data retrieval.
-   *
-   * This function is typically used in pagination systems to respond to a page change event.
-   * It calculates the data offset based on the clicked page number and updates the offset
-   * in the search settings. Then, it triggers a data retrieval action, such as an API call.
-   *
-   * @param {Event} event - The page change event, typically a click event.
+   * Public method to update results
    */
-  handlePageChange(event: Event) {
-    if (!this.searchSettings) {
-      return;
-    }
+  public async updateResults(
+    query: string,
+    vertical: string,
+    page: number = 1,
+    limit: number = 16
+  ): Promise<void> {
+    try {
+      this.isLoading = true;
+      const offset = (page - 1) * limit;
+      const currentSettings = yextStore.getSettings();
+      const needsUpdate =
+        currentSettings.input !== query ||
+        currentSettings.vertical !== vertical ||
+        currentSettings.page !== page ||
+        currentSettings.limit !== limit ||
+        currentSettings.offset !== offset;
 
-    const pageClicked = (event.target as HTMLElement).getAttribute(
-      'current-page'
-    );
+      if (needsUpdate) {
+        yextStore.updateSettings({
+          input: query,
+          vertical: vertical,
+          page: page,
+          limit: limit,
+          offset: offset,
+        });
+      }
 
-    // Check if pageClicked is not null and is a valid number
-    if (pageClicked !== null && !isNaN(Number(pageClicked))) {
-      const offset =
-        (Number(pageClicked) - 1) * (this.searchSettings.limit ?? 0);
-      this.searchSettings.offset = offset;
-      setStoredSearchSettings(this.searchSettings);
-      this.fetchEndpoint.run();
+      this.currentQuery = query;
+      this.currentVertical = vertical;
+      this.currentPage = page;
 
-      // Scroll to top after updating the page
-      window.scrollTo({
-        top: 0,
-        behavior: 'smooth',
-      });
+      const response = await yextAPI.verticalSearch(
+        query,
+        vertical,
+        page,
+        limit
+      );
+
+      // Check for timeout error
+      if (response.response?.error?.errorType === 'TIMEOUT') {
+        this.isError = true;
+        this.results = [];
+        this.totalResults = 0;
+        return;
+      }
+
+      this.results = response.response.results;
+      this.totalResults = response.response.resultsCount;
+      this.isError = false;
+      this.errorMessage = '';
+    } catch (error) {
+      console.error('Vertical search failed:', error);
+      this.isError = true;
+    } finally {
+      this.isLoading = false;
     }
   }
 
-  resizeController = new ResizeController(this, {});
-
-  fetchEndpoint = new Task(
-    this,
-    async () => getYextSearchData({ verticalKey: this.verticalKey }),
-    () => []
-  );
-
-  displayAll(response: VerticalSearchResponseStructure) {
-    if (this.totalCount === 0) {
-      return html` <h2>No results found</h2> `;
-    }
-
-    return html`
-      <ul class="results-list">
-        ${repeat(
-          response.results,
-          result => result,
-          (result, index) => html`
-            <li class="result" data-index=${index}>
-              ${displayTeaser(this.verticalKey, result)}
-            </li>
-          `
-        )}
-      </ul>
-      <outline-yext-pager
-        current-page=${(this.searchSettings?.offset ?? 0) /
-          (this.searchSettings?.limit ?? 1) +
-        1}
-        total-pages=${Math.ceil(
-          (this.totalCount ?? 0) / (this.searchSettings?.limit ?? 1)
-        )}
-        @click=${(e: Event) => this.handlePageChange(e)}
-        aria-live="polite"
-      ></outline-yext-pager>
-    `;
+  private handlePageChange(e: CustomEvent) {
+    const page = e.detail.page;
+    this.updateResults(
+      this.currentQuery,
+      this.currentVertical,
+      page,
+      this.itemsPerPage
+    ).then(() => {
+      // Scroll the component into view
+      this.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Wait for DOM update before focusing
+      setTimeout(() => {
+        const firstResult = this.shadowRoot?.querySelector('.result-item');
+        if (firstResult) {
+          (firstResult as HTMLElement).focus();
+        }
+      }, 100);
+    });
   }
 
-  debugTemplate(data: {}): TemplateResult {
-    return html`
-      <details class="debug">
-        <summary></summary>
-        <div>
-          <pre>${JSON.stringify(data, null, 2)}</pre>
-        </div>
-      </details>
-    `;
-  }
-
-  render(): TemplateResult {
-    if (!this.searchSettings) {
-      return html``;
-    }
-
-    const classes = {
-      wrapper: true,
-      isMobile: this.resizeController.currentBreakpointRange === 0,
+  private formatDate(dateString: string): string {
+    const date = new Date(dateString);
+    const options: Intl.DateTimeFormatOptions = {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: true,
     };
+    return new Intl.DateTimeFormat('en-US', options).format(date);
+  }
 
-    return html`
-      <div>
-        <div class="${classMap(classes)}">
-          <main>
-            ${this.fetchEndpoint.render({
-              pending: () => Pending(),
-              complete: data => {
-                if (!data) {
-                  return;
-                }
+  private getCategoryFromURL(url: string): string {
+    const regex = /\/([^/]+)(?=\/[^/]+$)/;
+    const match = url.match(regex);
+    return match && match[1]
+      ? match[1]
+          .split('-')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ')
+      : '';
+  }
 
-                if (!isVerticalSearchResponse(data.response)) {
-                  return;
-                }
+  private getTeaserTitle(
+    vertical: string,
+    title: string,
+    url: string | undefined
+  ): string {
+    const prefixes: { [key: string]: string } = {
+      careers_area: 'Careers',
+      procedure: this.getCategoryFromURL(url || ''),
+      careers_page: 'Careers at Community',
+    };
+    const prefix = prefixes[vertical] || '';
+    return prefix ? `${prefix} | ${title}` : title;
+  }
 
-                this.totalCount = data.response.resultsCount;
+  private renderHighlightedField(field: string, result: YextResult): string {
+    const fieldData = result.highlightedFields?.[field];
+    if (!fieldData || !fieldData.matchedSubstrings?.length) {
+      return (result.data[field] as string) || '';
+    }
 
-                return html`
-                  ${TotalCount({
-                    totalCount: this.totalCount,
-                    limit: this.searchSettings?.limit ?? null,
-                    offset: this.searchSettings?.offset ?? 0,
-                  })}
-                  ${this.displayAll(data.response)}
-                `;
-              },
-            })}
-          </main>
+    const value = fieldData.value;
+    const matches = fieldData.matchedSubstrings;
+
+    // Sort matches by offset to ensure proper order
+    const sortedMatches = matches.sort(
+      (a: MatchedSubstring, b: MatchedSubstring) => a.offset - b.offset
+    );
+    let highlightedText = '';
+    let lastIndex = 0;
+
+    sortedMatches.forEach((match: MatchedSubstring) => {
+      // Add text before the match
+      if (match.offset > lastIndex) {
+        highlightedText += value.slice(lastIndex, match.offset);
+      }
+
+      // Add highlighted text
+      highlightedText += `<em>${value.slice(
+        match.offset,
+        match.offset + match.length
+      )}</em>`;
+      lastIndex = match.offset + match.length;
+    });
+
+    // Add remaining text after last match
+    if (lastIndex < value.length) {
+      highlightedText += value.slice(lastIndex);
+    }
+
+    return highlightedText;
+  }
+
+  private renderResultCard(result: YextResult) {
+    return displayTeaser(result);
+  }
+
+  private getResultsSummary() {
+    if (this.totalResults === 0) {
+      return NoResultsMessage();
+    }
+    return html`<strong
+        >${(this.currentPage - 1) * this.itemsPerPage + 1}-${Math.min(
+          this.currentPage * this.itemsPerPage,
+          this.totalResults
+        )}</strong
+      >
+      of ${this.totalResults} results`;
+  }
+
+  render() {
+    if (this.isError) {
+      return html`<div class="results-container">${NoResultsMessage()}</div>`;
+    }
+
+    if (this.isLoading) {
+      return html`
+        <div class="loading-container" role="status">
+          <div class="spinner" aria-label="Loading results"></div>
         </div>
-      </div>
-    `;
+      `;
+    }
+
+    // Only show results container if we have results or need to show "no results found"
+    if (
+      this.currentQuery &&
+      (this.totalResults > 0 || this.currentQuery.length > 0)
+    ) {
+      return html`
+        <div class="results-container">
+          <div
+            class="${this.totalResults === 0
+              ? 'no-results-message'
+              : 'results-header'}"
+            role="status"
+          >
+            ${this.getResultsSummary()}
+          </div>
+
+          ${this.totalResults > 0
+            ? html`
+                <ul class="results-grid">
+                  ${this.results.map(
+                    result => html`
+                      <li class="result-item">
+                        ${this.renderResultCard(result)}
+                      </li>
+                    `
+                  )}
+                </ul>
+
+                ${this.totalResults > this.itemsPerPage
+                  ? html`
+                      <outline-yext-pager
+                        current-page="${this.currentPage}"
+                        total-pages="${Math.ceil(
+                          this.totalResults / this.itemsPerPage
+                        )}"
+                        @page-change="${this.handlePageChange}"
+                      ></outline-yext-pager>
+                    `
+                  : ''}
+              `
+            : ''}
+        </div>
+      `;
+    }
+
+    // Return empty if no query or no results to display
+    return html``;
   }
 }
 
-declare global {
-  interface HTMLElementTagNameMap {
-    'outline-yext-vertical': OutlineYextVertical;
-  }
-}
+customElements.define('outline-yext-vertical', OutlineYextVertical);

@@ -4,14 +4,85 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Component Test Page</title>
+    <title>Yext Search Components</title>
+    <style>
+      /* 1. Use a more-intuitive box-sizing model */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      /* 2. Remove default margin */
+      * {
+        margin: 0;
+      }
+
+      body {
+        /* 3. Add accessible line-height */
+        line-height: 1.5;
+        /* 4. Improve text rendering */
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* 5. Improve media defaults */
+      img,
+      picture,
+      video,
+      canvas,
+      svg {
+        display: block;
+        max-width: 100%;
+      }
+
+      /* 6. Inherit fonts for form controls */
+      input,
+      button,
+      textarea,
+      select {
+        font: inherit;
+      }
+
+      /* 7. Avoid text overflows */
+      p,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6 {
+        overflow-wrap: break-word;
+      }
+
+      /* 8. Improve line wrapping */
+      p {
+        text-wrap: pretty;
+      }
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6 {
+        text-wrap: balance;
+      }
+
+      /*
+        9. Create a root stacking context
+      */
+      #root,
+      #__next {
+        isolation: isolate;
+      }
+    </style>
     <script src="/src/index.ts" type="module"></script>
+    <script src="dist/index.js" type="module"></script>
     <!--
     To include the necessary assets for testing, you have several options:
 
     1. Full Production Bundle: This is the entire application bundled together.
        You can include it by uncommenting the following line:
-       <script src="dist/index.js" type="module"></script>
+       
 
     2. Individual Components: If you want to test specific components, you can
        import them individually. You'll need to know the path to the component
@@ -28,7 +99,9 @@
     HTML file.
   -->
     <!-- <script src="dist/index.mjs" type="module"></script> -->
-    <link rel="stylesheet" href="/global.css" />
+
+    <link rel="stylesheet" href="dist/global.css" />
+
     <script>
       function switchComponent(componentName) {
         const container = document.querySelector('.component-container');
@@ -44,10 +117,8 @@
       style="
         display: flex;
         justify-content: flex-end;
-        position: absolute;
-        right: 0;
-        top: 0;
-        z-index: 1;
+        padding: 1rem;
+        gap: 0.5rem;
       "
     >
       <button onclick="switchComponent('outline-yext-universal')">
@@ -59,7 +130,6 @@
     </header>
     <div class="component-container">
       <outline-yext-universal></outline-yext-universal>
-      <!-- <outline-yext-entities></outline-yext-entities> -->
     </div>
   </body>
 </html>
