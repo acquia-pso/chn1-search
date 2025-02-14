@@ -15,3 +15,6 @@
     background-color: var(--c-brand-orange-100);
   }
 }
+.btn.is-generative {
+  font-size: 1rem;
+}

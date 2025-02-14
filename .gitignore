@@ -3,3 +3,5 @@ dist/
 storybook-static/
 .yarn/install-state.gz
 .yarn/unplugged/
+test-results/
+playwright-report/

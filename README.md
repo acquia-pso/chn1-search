@@ -1,3 +1,70 @@
+# Yext Search Integration Application
+
+## Overview
+This application provides a modern, component-based integration with Yext's search services, offering both universal and vertical search capabilities with a focus on performance and user experience.
+
+## Core Components
+
+### Data Layer
+- **Yext Store**: Manages search state and settings using URL parameters
+- **Data Access Layer**: Handles communication with Yext APIs
+- **Type System**: Comprehensive TypeScript definitions for all Yext-related data structures
+
+### UI Components
+- **Universal Search**: Cross-vertical search functionality
+- **Vertical Search**: Specialized search within specific verticals
+- **Search Results**: Display and pagination of search results
+- **Faceted Navigation**: Filter management and display
+- **Entity Display**: Standardized display of various entity types
+
+### Features
+- URL-based state management for shareable searches
+- Faceted search with dynamic filters
+- Universal and vertical-specific search capabilities
+- Responsive design with modern UI components
+- Type-safe implementation using TypeScript
+
+## Project Structure
+```
+src/
+├── components/
+│   ├── outline-yext-universal/    # Universal search components
+│   ├── outline-yext-vertical/     # Vertical-specific components
+│   ├── outline-yext-pager/        # Pagination components
+│   └── outline-yext-entities/     # Entity display components
+├── libraries/
+│   ├── data-access-yext/         # Yext API integration
+│   └── ui-yext/                  # Shared UI components
+├── controllers/                   # Application controllers
+└── tests/                        # Test suites
+```
+
+## Technical Documentation
+For detailed technical documentation, please refer to the following guides:
+- [Architecture Overview](docs/ARCHITECTURE.md)
+- [Component Documentation](docs/COMPONENTS.md)
+- [Data Layer Documentation](docs/DATA_LAYER.md)
+- [Development Guide](docs/DEVELOPMENT.md)
+
+## Getting Started
+1. Install dependencies:
+   ```bash
+   yarn install
+   ```
+
+2. Configure Yext API credentials in your environment
+
+3. Start the development server:
+   ```bash
+   yarn dev
+   ```
+
+## Contributing
+Please read our [Contributing Guide](docs/CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+
+## License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 # CHN-Yext
 
 ## Preview in Gitpod

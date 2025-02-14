@@ -25,9 +25,18 @@ export class OutlineButton extends LitElement {
   @property({ type: String, attribute: 'button-title' })
   buttonTitle: string | undefined;
 
+  @property({ type: Boolean, attribute: 'is-generative' })
+  isGenerative?: boolean;
+
   render(): TemplateResult {
     return this.buttonTitle && this.buttonUrl
-      ? html` <a href="${this.buttonUrl}" class="btn">${this.buttonTitle}</a> `
+      ? html`
+          <a
+            href="${this.buttonUrl}"
+            class="btn ${this.isGenerative ? 'is-generative' : ''}"
+            >${this.buttonTitle}</a
+          >
+        `
       : html``;
   }
 }

@@ -1,324 +1,315 @@
-import { LitElement, html, noChange, TemplateResult } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
-import { repeat } from 'lit/directives/repeat.js';
-import { classMap } from 'lit/directives/class-map.js';
-import componentStyles from './outline-yext-universal.css?inline';
-import { Task } from '@lit/task';
-import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import { ResizeController } from '../../controllers/resize-controller';
-import { AdoptedStyleSheets } from '../../controllers/adopted-stylesheets.ts';
-import { displayTeaser } from '../outline-yext-vertical/teaser';
-
-import type {
-  SearchSettings,
-  Result,
-  UniversalSearchResponse,
-  Module,
-} from '../../libraries/data-access-yext/yext-types';
-
-import '../outline-yext-vertical/outline-yext-vertical';
+import { LitElement, html, unsafeCSS } from 'lit';
+import { state } from 'lit/decorators.js';
 import {
-  defaultSearchSettings,
-  getStoredSearchSettings,
-  setStoredSearchSettings,
-  syncSearchSettingsInStore,
+  yextStore,
+  type SearchSettings,
+  type StoreSubscriber,
 } from '../../libraries/data-access-yext/yext-store';
+import { type YextSuggestion } from '../../libraries/data-access-yext/yext-types';
 import {
-  getYextSearchData,
-  isVerticalSearchResponse,
-  getYextSuggestions,
+  yextAPI,
+  type YextResult,
+  type YextUniversalSearchResponse,
 } from '../../libraries/data-access-yext/yext-api';
-import Pending from '../../libraries/ui-yext/pending';
-import { debounce } from '../../utilities/debounce';
+import { displayTeaser } from '../outline-yext-vertical/teaser';
+import '../outline-yext-vertical/outline-yext-vertical';
+import '../shared/outline-teaser/outline-teaser';
+import { NoResultsMessage } from '../../libraries/ui-yext/no-results-message';
+import componentStyles from './outline-yext-universal.css?inline';
 
-@customElement('outline-yext-universal')
-export class OutlineYextUniversal extends LitElement {
-  adoptedStyleSheets = new AdoptedStyleSheets(this, {
-    encapsulatedCSS: componentStyles,
-  });
+function debounce<T extends (arg: string) => void>(
+  func: T,
+  wait: number
+): (arg: string) => void {
+  let timeout: number | null = null;
 
-  @property({ type: Boolean, reflect: true, attribute: 'debug' })
-  debug: boolean | undefined;
+  return (arg: string) => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    timeout = window.setTimeout(() => {
+      func(arg);
+      timeout = null;
+    }, wait);
+  };
+}
 
-  @state()
-  private searchSettings: SearchSettings | undefined;
+interface OutlineYextVerticalElement extends HTMLElement {
+  updateResults(
+    input: string,
+    vertical: string,
+    page: number,
+    limit: number
+  ): Promise<void>;
+}
 
-  @state()
-  private totalCount: number | null = null;
+interface MatchedSubstring {
+  offset: number;
+  length: number;
+}
 
-  @state()
-  private activeVertical: string = 'all';
+/**
+ * Universal search component that provides cross-vertical search functionality
+ * Implements accessibility features and clean state management
+ */
+export class OutlineYextUniversal
+  extends LitElement
+  implements StoreSubscriber
+{
+  @state() private searchValue = '';
+  @state() private currentSuggestions: YextSuggestion[] = [];
+  @state() private showSuggestions = false;
+  @state() private isLoading = false;
+  @state() private currentVertical = 'all';
+  @state() private verticals: string[] = [];
+  @state() private verticalCounts = new Map<string, number>();
+  @state() private universalResponse:
+    | YextUniversalSearchResponse['response']
+    | null = null;
+  @state() private error: string | null = null;
+  @state() private isSearching = false;
+  @state() private hasSearched = false;
+  private needsScrollAndFocus = false;
 
-  @state()
-  private suggestionsIsOpen = false;
+  private suggestionTimeout: number | null = null;
+  private verticalComponent: OutlineYextVerticalElement | null = null;
+  private readonly debouncedHandleInput: (value: string) => void;
+  private searchInputRef: HTMLInputElement | null = null;
 
-  @state()
-  private isUserTyping = false;
+  static styles = unsafeCSS(componentStyles);
 
-  @state()
-  private isSearching = false;
+  constructor() {
+    super();
+    this.debouncedHandleInput = debounce(this.handleInput.bind(this), 200);
+  }
 
-  @state()
-  private hasSearched = false;
-
-  @state()
-  private searchSuggestions: Result[] = [];
-
-  @state()
-  private displayResults = false;
-
-  private modalFiltersOpenClose = false;
-  private dropdownVerticalsOpen = false;
-
-  private taskValue: unknown;
-
-  private resizeController = new ResizeController(this, {});
-
-  private fetchEndpoint = new Task(
-    this,
-    async () => {
-      if(!this.searchSettings?.input){
-        return undefined
-      }
-      return getYextSearchData()
-    },
-    () => []
-  );
-
-  // Add default sortBys
-  private defaultSortBys = [{type: 'RELEVANCE'}];
-
-  connectedCallback() {
+  connectedCallback(): void {
     super.connectedCallback();
-    window.addEventListener('popstate', this.handlePopState);
-    // This overrides replace state and is necessary for back button browser navigation
-    window.history.replaceState = function (...args: any[]) {
-    };
-    this.initializeFromUrl();
-    this.initializeSearchSettings();
+    yextStore.subscribe(this);
   }
-  disconnectedCallback() {
+
+  firstUpdated(): void {
+    this.searchInputRef =
+      this.shadowRoot?.querySelector('input[type="search"]') || null;
+    // Add click event listener to handle clicks outside
+    document.addEventListener('click', this.handleClickOutside.bind(this));
+  }
+
+  disconnectedCallback(): void {
     super.disconnectedCallback();
-    window.removeEventListener('popstate', this.handlePopState);
+    yextStore.unsubscribe(this);
+    if (this.suggestionTimeout) {
+      clearTimeout(this.suggestionTimeout);
+    }
+    // Remove click event listener
+    document.removeEventListener('click', this.handleClickOutside.bind(this));
   }
 
-  private initializeFromUrl() {
-    const params = new URLSearchParams(window.location.search);
+  async onStateChange(settings: SearchSettings): Promise<void> {
+    this.searchValue = settings.input || '';
+    this.currentVertical = settings.vertical || 'all';
 
-    // Parse and set active vertical
-    const activeVertical = params.get('yext_activeVertical');
-    if (activeVertical) {
-      this.activeVertical = activeVertical;
-    }
-    else{
-      this.activeVertical = 'all'
-    }
+    if (settings.input) {
+      await this.performSearch(settings);
 
-    // Initialize searchSettings with defaults first
-    this.searchSettings = {
-      ...defaultSearchSettings,
-      sortBys: this.defaultSortBys,
-      activeVertical: this.activeVertical
-    };
+      // After search completes, check if we need to scroll and focus
+      if (this.needsScrollAndFocus) {
+        this.needsScrollAndFocus = false;
+        requestAnimationFrame(() => {
+          const verticalsContainer = this.shadowRoot?.querySelector(
+            '.verticals-container'
+          );
+          verticalsContainer?.scrollIntoView({ behavior: 'smooth' });
 
-    // Parse other URL parameters
-    const input = params.get('yext_input');
-    if (input && this.searchSettings) {
-      this.searchSettings.input = input;
-    }
-    // Since we are not running a search we need to cause a re render
-    else{
-      this.searchSettings.input = ''    
-      this.requestUpdate()
-    }
-
-    const retrieveFacets = params.get('yext_retrieveFacets');
-    if (retrieveFacets && this.searchSettings) {
-      this.searchSettings.retrieveFacets = retrieveFacets === 'true';
-    }
-
-    const sortBys = params.get('yext_sortBys');
-    if (sortBys && this.searchSettings) {
-      try {
-        // Parse the sortBys parameter directly without decoding
-        this.searchSettings.sortBys = JSON.parse(sortBys);
-      } catch (e) {
-        console.warn('Failed to parse sortBys from URL, using defaults:', e);
-        this.searchSettings.sortBys = this.defaultSortBys;
+          setTimeout(() => {
+            // Find the vertical component and focus its first result
+            const verticalComponent = this.shadowRoot?.querySelector(
+              'outline-yext-vertical'
+            );
+            if (verticalComponent) {
+              const firstResult =
+                verticalComponent.shadowRoot?.querySelector('.result-item');
+              if (firstResult instanceof HTMLElement) {
+                firstResult.setAttribute('tabindex', '0');
+                firstResult.focus();
+              }
+            }
+          }, 300);
+        });
       }
+    } else {
+      this.clearResults();
     }
-
   }
 
-  private initializeSearchSettings() {
-    syncSearchSettingsInStore();
-    this.searchSettings = {
-      ...getStoredSearchSettings(),
-    };
-    setStoredSearchSettings(this.searchSettings);
-    this.displayResults = this.searchSettings.input !== '';
-    this.debouncedFetchSuggestion();
-  }
+  private async handleInput(value: string) {
+    this.searchValue = value;
 
-  private debouncedFetchSuggestion = debounce(
-    this.fetchSuggestion.bind(this),
-    150
-  );
-
-  private async fetchSuggestion() {
-    if (this.hasSearched || !this.isUserTyping || !this.searchSettings?.input) {
+    // Don't show suggestions if we're in search mode or input is too short
+    if (this.isSearching || !value || value.length < 3) {
+      this.showSuggestions = false;
+      this.currentSuggestions = [];
       return;
     }
 
     try {
-      const suggestions = await getYextSuggestions(this.searchSettings.input);
-      this.searchSuggestions = suggestions.response.results.slice(0, 10);
-      this.suggestionsIsOpen =
-        this.searchSuggestions.length > 0 && this.isUserTyping;
-      this.requestUpdate();
+      // Store the timeout ID for potential cancellation
+      this.suggestionTimeout = window.setTimeout(async () => {
+        const response = await yextAPI.getAutocomplete(value);
+        // Only show suggestions if we're not in search mode
+        if (!this.isSearching) {
+          this.currentSuggestions = response.response.results;
+          this.showSuggestions = this.currentSuggestions.length > 0;
+        }
+        this.suggestionTimeout = null;
+      }, 200) as unknown as number;
     } catch (error) {
-      console.error('Error fetching suggestions:', error);
+      console.error('Failed to fetch suggestions:', error);
+      this.showSuggestions = false;
+      this.currentSuggestions = [];
     }
   }
 
-  private handleInput(e: InputEvent) {
-    if (!this.searchSettings) return;
+  private handleInputEvent(e: Event) {
+    const input = e.target as HTMLInputElement;
+    this.searchValue = input.value;
+    this.isSearching = false; // Reset search mode when user starts typing again
+    this.debouncedHandleInput(input.value);
+  }
 
-    const input = (e.target as HTMLInputElement).value;
-    this.searchSettings = { ...this.searchSettings, input };
-    this.hasSearched = false;
-    this.isUserTyping = true;
-
-    if (input.length > 0 && !this.isSearching) {
-      this.debouncedFetchSuggestion();
-    } else {
-      this.cleanSearchSuggestions();
+  private handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // Cancel any pending suggestion requests
+      if (this.suggestionTimeout) {
+        clearTimeout(this.suggestionTimeout);
+        this.suggestionTimeout = null;
+      }
+      // Clear suggestions immediately
+      this.showSuggestions = false;
+      this.currentSuggestions = [];
+      // Update search value from input directly to ensure it's current
+      const input = e.target as HTMLInputElement;
+      this.searchValue = input.value;
+      // Trigger search immediately
+      this.handleSearch();
+    } else if (e.key === 'ArrowDown' && this.currentSuggestions.length > 0) {
+      e.preventDefault();
+      const firstSuggestion = this.shadowRoot?.querySelector(
+        '.suggestion-item'
+      ) as HTMLElement;
+      firstSuggestion?.focus();
+    } else if (e.key === 'Escape') {
+      this.showSuggestions = false;
     }
   }
 
-  private cleanSearchSuggestions() {
-    this.searchSuggestions = [];
-    this.suggestionsIsOpen = false;
-    this.requestUpdate();
-  }
-
-    private updateUrlWithSearchParams() {
-    const params = new URLSearchParams();
-
-    if (this.searchSettings?.input) {
-      params.set('yext_input', this.searchSettings.input);
+  private handleSearch() {
+    // Cancel any pending suggestion requests
+    if (this.suggestionTimeout) {
+      clearTimeout(this.suggestionTimeout);
+      this.suggestionTimeout = null;
     }
-
-    if (this.activeVertical !== 'all') {
-      params.set('yext_activeVertical', this.activeVertical);
-    }
-
-    if (this.searchSettings?.retrieveFacets) {
-      params.set('yext_retrieveFacets', String(this.searchSettings.retrieveFacets));
-    }
-
-    if (this.searchSettings?.sortBys) {
-      // Store sortBys as a plain JSON string without additional encoding
-      const sortBysString = JSON.stringify(this.searchSettings.sortBys);
-      params.set('yext_sortBys', sortBysString);
-    }
-
-    const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
-    window.history.pushState({ path: newUrl }, '', newUrl);
-  }
-
-  private search(e: Event) {
-    e.preventDefault();
-    this.suggestionsIsOpen = false;
+    this.showSuggestions = false;
+    this.currentSuggestions = [];
     this.isSearching = true;
     this.hasSearched = true;
-    this.isUserTyping = false;
-
-    if (!this.searchSettings) return;
-
-    const inputSearch = this.searchSettings.input;
-    this.searchSettings = {
-      ...defaultSearchSettings,
-      input: inputSearch,
-      activeVertical: 'all',
-    };
-    setStoredSearchSettings(this.searchSettings);
-
-    this.activeVertical = 'all';
-    this.displayResults = this.searchSettings.input !== '';
-    
-    // Update URL before fetching results
-    this.updateUrlWithSearchParams();
-
-    this.fetchEndpoint.run().then(() => {
-      this.isSearching = false;
+    yextStore.updateSettings({
+      input: this.searchValue,
+      vertical: 'all',
+      page: 1,
     });
   }
 
-  private handleSuggestion(suggestion: Result) {
-    if (!this.searchSettings) return;
-    
-    this.activeVertical = 'all'
-    this.searchSettings = {
-      ...this.searchSettings,
+  private selectSuggestion(suggestion: YextSuggestion) {
+    this.searchValue = suggestion.value;
+    this.showSuggestions = false;
+    this.hasSearched = true;
+    yextStore.updateSettings({
       input: suggestion.value,
-    };
-    setStoredSearchSettings(this.searchSettings);
-
-    this.displayResults = true;
-
-    // Update URL before fetching results
-    this.updateUrlWithSearchParams();
-
-    this.fetchEndpoint.run();
-    this.suggestionsIsOpen = false;
+      vertical: suggestion.verticalKeys[0] || 'all',
+      page: 1,
+    });
   }
 
-  private _focusIn() {
-    this.suggestionsIsOpen = this.searchSuggestions.length > 0;
-  }
+  private async performSearch(settings: SearchSettings) {
+    this.isLoading = true;
+    this.error = null;
+    this.hasSearched = true;
 
-  private _focusOut(e: FocusEvent) {
-    const currentTarget = e.currentTarget as Node;
-    const relatedTarget = e.relatedTarget as Node;
+    try {
+      const input = settings.input || '';
+      const response = await yextAPI.universalSearch(input);
 
-    setTimeout(() => {
-      if (!currentTarget.contains(relatedTarget)) {
-        this.cleanSearchSuggestions();
+      // Check for timeout error - handle both possible response structures
+      if (
+        'error' in response.response &&
+        response.response.error?.errorType === 'TIMEOUT'
+      ) {
+        console.warn('Search timeout detected');
+        this.universalResponse = null;
+        this.verticals = [];
+        this.verticalCounts = new Map();
+        return NoResultsMessage();
       }
-    }, 0);
-  }
 
-  private setActiveVertical(vertical: string) {
-    if (!this.searchSettings) return;
+      this.universalResponse = response.response;
 
-    this.activeVertical = vertical;
-    this.searchSettings = {
-      ...this.searchSettings,
-      offset: 0,
-      activeVertical: vertical,
-      sortBys: this.defaultSortBys
-    };
-    setStoredSearchSettings(this.searchSettings);
+      const availableVerticals = response.response.modules.map(
+        module => module.verticalConfigId
+      );
 
-    this.dropdownVerticalsOpen = false;
+      this.verticalCounts = new Map(
+        response.response.modules.map(module => [
+          module.verticalConfigId,
+          module.resultsCount,
+        ])
+      );
 
-    // Update URL before fetching results
-    this.updateUrlWithSearchParams();
+      this.verticals = availableVerticals;
 
-    if (vertical !== 'all') {
-      this.shadowRoot
-        ?.querySelector('outline-yext-vertical')
-        ?.setAttribute('vertical-key', this.activeVertical);
-      this.shadowRoot
-        ?.querySelector('outline-yext-vertical')
-        ?.fetchEndpoint.run();
-    } else {
-      this.fetchEndpoint.run();
+      if (settings.vertical && settings.vertical !== 'all') {
+        if (!this.verticalComponent) {
+          this.verticalComponent = document.createElement(
+            'outline-yext-vertical'
+          ) as OutlineYextVerticalElement;
+          this.shadowRoot
+            ?.querySelector('.results-container')
+            ?.appendChild(this.verticalComponent);
+        }
+
+        await this.verticalComponent.updateResults(
+          input,
+          settings.vertical,
+          settings.page || 1,
+          settings.limit || 16
+        );
+      } else {
+        if (this.verticalComponent) {
+          this.verticalComponent.remove();
+          this.verticalComponent = null;
+        }
+      }
+    } catch (error) {
+      console.error('Search failed:', error);
+      this.error = 'Search failed. Please try again.';
+      this.universalResponse = null;
+    } finally {
+      this.isLoading = false;
     }
   }
 
-  private setVerticalTitle(title: string): string {
+  private clearResults() {
+    if (this.verticalComponent) {
+      this.verticalComponent.remove();
+      this.verticalComponent = null;
+    }
+    this.universalResponse = null;
+    this.verticals = [];
+    this.error = null;
+  }
+
+  private getVerticalDisplayName(verticalKey: string): string {
     const titleMap: { [key: string]: string } = {
       'blog': 'Blog',
       'careers_area': 'Career Area',
@@ -335,366 +326,351 @@ export class OutlineYextUniversal extends LitElement {
     };
 
     return (
-      titleMap[title] ||
-      title.replace(/_/g, ' ').replace(/\b\w/g, match => match.toUpperCase())
+      titleMap[verticalKey] ||
+      verticalKey
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, match => match.toUpperCase())
     );
   }
 
-  private highlightWord(string: string, words: string): string {
-    const regex = new RegExp(words, 'gi');
-    return string.replace(
-      regex,
-      str => `<span class="suggestion-highlight">${str}</span>`
+  private renderHighlightedText(suggestion: YextSuggestion) {
+    const result = suggestion.value;
+    const matches = suggestion.matchedSubstrings.sort(
+      (a, b) => a.offset - b.offset
+    );
+
+    if (matches.length === 0) {
+      return html`${result}`;
+    }
+
+    const parts: Array<ReturnType<typeof html>> = [];
+    let lastIndex = 0;
+
+    matches.forEach(match => {
+      // Add text before the match
+      if (match.offset > lastIndex) {
+        parts.push(html`${result.slice(lastIndex, match.offset)}`);
+      }
+
+      // Add highlighted text
+      parts.push(
+        html`<mark
+          >${result.slice(match.offset, match.offset + match.length)}</mark
+        >`
+      );
+      lastIndex = match.offset + match.length;
+    });
+
+    // Add remaining text after last match
+    if (lastIndex < result.length) {
+      parts.push(html`${result.slice(lastIndex)}`);
+    }
+
+    return html`${parts}`;
+  }
+
+  private calculateTotalResults(
+    response: YextUniversalSearchResponse['response']
+  ): number {
+    return response.modules.reduce(
+      (sum, module) => sum + (module.resultsCount || 0),
+      0
     );
   }
 
-  private searchFormTemplate(): TemplateResult {
-    if (!this.searchSettings) return html``;
-
-    const breakpointClass =
-      this.resizeController.currentBreakpointRange === 0
-        ? 'is-mobile'
-        : 'is-desktop';
-
-    return html`
-      <div class="search-form ${breakpointClass}">
-        <div
-          class="search-form__inner"
-          @focusout="${(e: FocusEvent) => this._focusOut(e)}"
-        >
-          <form
-            action="/search"
-            method="get"
-            id="views-exposed-form-search-search-page"
-            accept-charset="UTF-8"
-            class="${breakpointClass}"
-            @submit="${(e: Event) => this.search(e)}"
-          >
-            <div
-              class="js-form-item form-item js-form-type-textfield form-item-text js-form-item-text"
-            >
-              <label
-                for="edit-search-api-fulltext"
-                class="sr-only form-item__label"
-                >Keyword</label
-              >
-              <input
-                placeholder=""
-                type="text"
-                id="edit-search-api-fulltext"
-                name="field_keyword"
-                .value=${this.searchSettings.input}
-                @input=${this.handleInput}
-                @focus="${this._focusIn}"
-                maxlength="128"
-                class="form-text form-element form-element--type-text form-element--api-textfield"
-              />
-            </div>
-            <div
-              data-drupal-selector="edit-actions"
-              class="form-actions js-form-wrapper form-wrapper"
-            >
-              <button
-                class="btn btn--search form-submit"
-                data-drupal-selector="edit-submit"
-                type="submit"
-                id="edit-submit"
-                value="Search"
-              >
-                <span>Search</span>
-              </button>
-            </div>
-          </form>
-          ${this.renderSuggestions()}
-        </div>
-      </div>
-    `;
-  }
-
-  private renderSuggestions(): TemplateResult {
-    if (!this.suggestionsIsOpen || this.isSearching || this.hasSearched) {
-      return html``;
+  private renderHighlightedField(field: string, result: YextResult): string {
+    const fieldData = result.highlightedFields?.[field];
+    if (!fieldData || !fieldData.matchedSubstrings?.length) {
+      return (result.data[field] as string) || '';
     }
 
-    return html`
-      <ul aria-live="polite" class="suggested-list">
-        ${this.searchSuggestions.map(
-          suggestion => html`
-            <li>
-              <button
-                type="button"
-                @click="${() => this.handleSuggestion(suggestion)}"
-              >
-                ${unsafeHTML(
-                  this.highlightWord(
-                    suggestion.value,
-                    this.searchSettings?.input ?? ''
-                  )
-                )}
-              </button>
-            </li>
-          `
-        )}
-      </ul>
-    `;
-  }
+    const value = fieldData.value;
+    const matches = fieldData.matchedSubstrings;
 
-  private displayAll(response: UniversalSearchResponse): TemplateResult {
-    if (response.modules?.length === 0) {
-      return this.renderNoResultsFound();
+    // Sort matches by offset to ensure proper order
+    const sortedMatches = matches.sort(
+      (a: MatchedSubstring, b: MatchedSubstring) => a.offset - b.offset
+    );
+    let highlightedText = '';
+    let lastIndex = 0;
+
+    sortedMatches.forEach((match: MatchedSubstring) => {
+      // Add text before the match
+      if (match.offset > lastIndex) {
+        highlightedText += value.slice(lastIndex, match.offset);
+      }
+
+      // Add highlighted text
+      highlightedText += `<em>${value.slice(
+        match.offset,
+        match.offset + match.length
+      )}</em>`;
+      lastIndex = match.offset + match.length;
+    });
+
+    // Add remaining text after last match
+    if (lastIndex < value.length) {
+      highlightedText += value.slice(lastIndex);
     }
 
-    return html`
-      <div class="results-list">
-        ${repeat(
-          response.modules,
-          (module: Module) => module,
-          module => this.renderResultsSection(module)
-        )}
-      </div>
-    `;
+    return highlightedText;
   }
 
-  private renderNoResultsFound(): TemplateResult {
-    return html`
-      <div class="no-results-message">
-        <h2 class="no-results-heading">Sorry, we couldn't find anything</h2>
-        <div class="no-results-copy">
-          <p>
-            We couldn't find any matches for your search. Try checking your
-            spelling, refining your search terms, using synonyms, or expanding
-            your search criteria.
-          </p>
-          <p>If you need assistance, please call 800-777-7775.</p>
-        </div>
-      </div>
-    `;
+  private renderTeaser(result: YextResult) {
+    return displayTeaser(result);
   }
 
-  private renderResultsSection(module: Module): TemplateResult {
-    return html`
-      <div class="results-section">
-        <div class="results-section-heading">
-          <h2 class="results-section-type">
-            ${this.setVerticalTitle(module.verticalConfigId)}
-          </h2>
-          <button
-            class=""
-            @click="${() => this.setActiveVertical(module.verticalConfigId)}"
-          >
-            View All
-          </button>
-        </div>
-        <ul class="results">
-          ${repeat(
-            module.results.slice(0, 3),
-            result => result,
-            (result, _index) => html`
-              <li class="result">
-                ${displayTeaser(module.verticalConfigId, result)}
-              </li>
-            `
-          )}
-        </ul>
-      </div>
-    `;
+  private formatDate(dateString: string): string {
+    const date = new Date(dateString);
+    const options: Intl.DateTimeFormatOptions = {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: true,
+    };
+    return new Intl.DateTimeFormat('en-US', options).format(date);
   }
 
-  private mobileVerticalNavTemplate(
-    response: UniversalSearchResponse
-  ): TemplateResult {
+  private getTeaserTitle(
+    vertical: string,
+    title: string,
+    url: string | undefined
+  ): string {
+    const prefixes: { [key: string]: string } = {
+      careers_area: 'Careers',
+      procedure: this.getCategoryFromURL(url || ''),
+      careers_page: 'Careers at Community',
+    };
+    const prefix = prefixes[vertical] || '';
+    return prefix ? `${prefix} | ${title}` : title;
+  }
+
+  private getCategoryFromURL(url: string): string {
+    const regex = /\/([^/]+)(?=\/[^/]+$)/;
+    const match = url.match(regex);
+    return match && match[1]
+      ? match[1]
+          .split('-')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ')
+      : '';
+  }
+
+  private handleClickOutside(event: MouseEvent) {
+    const target = event.target as Node;
+    const searchContainer = this.shadowRoot?.querySelector('.search-container');
+
+    if (searchContainer && !searchContainer.contains(target)) {
+      this.showSuggestions = false;
+    }
+  }
+
+  private handleBlur(_event: FocusEvent) {
+    // Don't hide suggestions immediately to allow clicking on them
+    setTimeout(() => {
+      const activeElement = this.shadowRoot?.activeElement as Node | null;
+      const suggestionsContainer = this.shadowRoot?.querySelector(
+        '.suggestions-container'
+      );
+
+      if (!suggestionsContainer?.contains(activeElement)) {
+        this.showSuggestions = false;
+      }
+    }, 200);
+  }
+
+  render() {
     return html`
-      ${response.modules.length !== 0
-        ? html`
-            <div class="vertical-nav is-mobile">
-              <h2 class="vertical-nav__heading is-mobile">
-                Refine Your Search
-              </h2>
-              <div class="vertical-nav__dropdown">
-                <button
-                  class="vertical-nav__dropdown-button ${this
-                    .dropdownVerticalsOpen
-                    ? 'is-open'
-                    : ''}"
-                  aria-expanded="${this.dropdownVerticalsOpen}"
-                  aria-label="Select content type"
-                  aria-controls="vertical-dropdown-content"
-                  @click=${() =>
-                    (this.dropdownVerticalsOpen = !this.dropdownVerticalsOpen)}
-                >
-                  ${this.setVerticalTitle(this.activeVertical)}
-                </button>
-                <div
-                  id="vertical-dropdown-content"
-                  class="vertical-nav__dropdown-wrapper ${this
-                    .dropdownVerticalsOpen
-                    ? 'is-open'
-                    : ''}"
-                >
-                  <ul class="vertical-nav__list mobile">
-                    <li class="${this.activeVertical == 'all' ? 'active' : ''}">
-                      <button
-                        @click="${() => this.setActiveVertical('all')}"
-                        class="vertical-nav__item"
-                      >
-                        All
-                      </button>
-                    </li>
-                    ${repeat(
-                      response.modules,
-                      (result: Module) => result,
-                      (result, index) => html`
-                        <li
-                          data-index=${index}
-                          class="${this.activeVertical ===
-                          result.verticalConfigId
-                            ? 'active'
-                            : ''}"
+      <div class="search-container">
+        <div class="search-section">
+          <div class="search-input-group">
+            <input
+              type="search"
+              placeholder="Search..."
+              aria-label="Search input"
+              autocomplete="off"
+              aria-controls="search-suggestions"
+              aria-expanded="${this.showSuggestions}"
+              .value="${this.searchValue}"
+              @input="${this.handleInputEvent}"
+              @keydown="${this.handleKeydown}"
+              @blur="${this.handleBlur}"
+            />
+            <button
+              class="search-button"
+              ?disabled="${this.isLoading}"
+              @click="${this.handleSearch}"
+            >
+              ${this.isLoading ? html`<span class="spinner"></span>` : 'Search'}
+            </button>
+
+            ${this.showSuggestions
+              ? html`
+                  <div
+                    class="suggestions-container"
+                    role="listbox"
+                    id="search-suggestions"
+                  >
+                    ${this.currentSuggestions.map(
+                      (suggestion, _index) => html`
+                        <button
+                          class="suggestion-item"
+                          role="option"
+                          @click="${() => this.selectSuggestion(suggestion)}"
                         >
-                          <button
-                            class="vertical-nav__item"
-                            @click="${() =>
-                              this.setActiveVertical(result.verticalConfigId)}"
+                          <span class="suggestion-text"
+                            >${this.renderHighlightedText(suggestion)}</span
                           >
-                            ${this.setVerticalTitle(result.verticalConfigId)}
-                          </button>
-                        </li>
+                          ${suggestion.verticalKeys.length > 0
+                            ? html`
+                                <span class="vertical-tag"
+                                  >${this.getVerticalDisplayName(
+                                    suggestion.verticalKeys[0]
+                                  )}</span
+                                >
+                              `
+                            : ''}
+                        </button>
                       `
                     )}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          `
-        : ``}
-    `;
-  }
+                  </div>
+                `
+              : ''}
+          </div>
 
-  private desktopVerticalNavTemplate(
-    response: UniversalSearchResponse
-  ): TemplateResult {
-    return html`
-      ${response.modules?.length !== 0
-        ? html`
-            <div class="vertical-nav is-desktop">
-              <h2 class="vertical-nav__heading is-desktop">
-                Refine Your Search
-              </h2>
-              <ul class="vertical-nav__list is-desktop">
-                <li class="${this.activeVertical == 'all' ? 'active' : ''}">
-                  <button @click="${() => this.setActiveVertical('all')}">
-                    All
-                  </button>
-                </li>
-                ${repeat(
-                  response.modules,
-                  (result: Module) => result,
-                  (result, index) => html`
-                    <li
-                      data-index=${index}
-                      class="${this.activeVertical === result.verticalConfigId
+          ${this.verticals.length > 0
+            ? html`
+                <div class="verticals-container" role="tablist">
+                  <h2 class="vertical-nav__heading">Refine Your Search</h2>
+                  <div class="vertical-tabs-container">
+                    <button
+                      class="vertical-tab ${this.currentVertical === 'all'
                         ? 'active'
                         : ''}"
+                      role="tab"
+                      aria-selected="${this.currentVertical === 'all'}"
+                      @click="${() =>
+                        yextStore.updateSettings({
+                          vertical: 'all',
+                          page: 1,
+                        })}"
                     >
-                      <button
-                        @click="${() =>
-                          this.setActiveVertical(result.verticalConfigId)}"
-                      >
-                        ${this.setVerticalTitle(result.verticalConfigId)}
-                      </button>
-                    </li>
-                  `
-                )}
-              </ul>
-            </div>
-          `
-        : ``}
-    `;
-  }
-
-  private handlePopState = () => {
-    try {
-      this.initializeFromUrl();      
-      this.fetchEndpoint.run();
-    } catch (error) {
-      console.warn('Error handling browser navigation:', error);
-      this.searchSettings = {
-        ...defaultSearchSettings,
-        sortBys: this.defaultSortBys
-      };
-      this.activeVertical = 'all';
-    }
-  };
-
-  render(): TemplateResult {
-    if (this.fetchEndpoint.value !== undefined) {
-      this.taskValue = this.fetchEndpoint.value;
-    }
-
-    const classes = {
-      'wrapper': true,
-      'is-mobile': this.resizeController.currentBreakpointRange === 0,
-      'is-visible': this.displayResults,
-    };
-
-    return html`
-      ${this.searchFormTemplate()}
-      <div class="${classMap(classes)}">
-        <div class="yext-results-wrapper">
-          ${this.fetchEndpoint.render({
-            pending: () => (this.taskValue ? Pending() : noChange),
-            complete: data => {
-              if (!data) {
-                return;
-              }
-
-              if (isVerticalSearchResponse(data.response)) {
-                return;
-              }
-
-              this.totalCount = data.response.modules.reduce(
-                (previousValue, { resultsCount }) =>
-                  previousValue + resultsCount,
-                0
-              );
-
-              return this.resizeController.currentBreakpointRange === 0
-                ? this.mobileVerticalNavTemplate(data.response)
-                : this.desktopVerticalNavTemplate(data.response);
-            },
-          })}
-          ${this.activeVertical !== 'all'
-            ? html`
-                <outline-yext-vertical
-                  vertical-key="${this.activeVertical}"
-                ></outline-yext-vertical>
+                      All
+                      (${this.universalResponse
+                        ? this.calculateTotalResults(this.universalResponse)
+                        : 0})
+                    </button>
+                    ${this.verticals.map(
+                      vertical => html`
+                        <button
+                          class="vertical-tab ${this.currentVertical ===
+                          vertical
+                            ? 'active'
+                            : ''}"
+                          role="tab"
+                          aria-selected="${this.currentVertical === vertical}"
+                          @click="${() =>
+                            yextStore.updateSettings({ vertical, page: 1 })}"
+                        >
+                          ${this.getVerticalDisplayName(vertical)}
+                          (${this.verticalCounts.get(vertical) || 0})
+                        </button>
+                      `
+                    )}
+                  </div>
+                </div>
               `
-            : html`
-                <main>
-                  ${this.fetchEndpoint.render({
-                    pending: () => (this.taskValue ? Pending() : noChange),
-                    complete: data => {
-                      if (!data) {
-                        return;
-                      }
-
-                      if (isVerticalSearchResponse(data.response)) {
-                        return;
-                      }
-
-                      return this.displayAll(data.response);
-                    },
-                  })}
-                </main>
-              `}
+            : ''}
         </div>
+
+        ${!this.hasSearched
+          ? ''
+          : html`
+              <div class="results-container">
+                ${(() => {
+                  if (this.error) {
+                    return html`<div class="error-message" role="alert">
+                      ${this.error}
+                    </div>`;
+                  }
+                  if (this.isLoading) {
+                    return html`
+                      <div class="loading-container" role="status">
+                        <div class="spinner" aria-label="Loading results"></div>
+                      </div>
+                    `;
+                  }
+                  if (
+                    this.currentVertical === 'all' &&
+                    this.universalResponse
+                  ) {
+                    return html`
+                      ${this.universalResponse.modules.length === 0
+                        ? NoResultsMessage()
+                        : html`
+                            ${this.universalResponse.modules.map(
+                              module => html`
+                                <div class="vertical-section">
+                                  <div class="vertical-header">
+                                    <h2 class="vertical-title">
+                                      ${this.getVerticalDisplayName(
+                                        module.verticalConfigId
+                                      )}
+                                    </h2>
+                                    <a
+                                      href="#"
+                                      class="view-all-link"
+                                      @click="${(e: Event) => {
+                                        e.preventDefault();
+                                        this.needsScrollAndFocus = true;
+                                        yextStore.updateSettings({
+                                          vertical: module.verticalConfigId,
+                                          page: 1,
+                                        });
+                                      }}"
+                                      aria-label="View all ${this.getVerticalDisplayName(
+                                        module.verticalConfigId
+                                      )} results"
+                                    >
+                                      View All
+                                    </a>
+                                  </div>
+                                  <div class="total-count">
+                                    <strong
+                                      >1-${Math.min(
+                                        3,
+                                        module.resultsCount
+                                      )}</strong
+                                    >
+                                    of ${module.resultsCount} results
+                                  </div>
+                                  <ul class="vertical-results">
+                                    ${module.results
+                                      .slice(0, 3)
+                                      .map(
+                                        result => html`
+                                          <li class="result-item">
+                                            ${this.renderTeaser(result)}
+                                          </li>
+                                        `
+                                      )}
+                                  </ul>
+                                </div>
+                              `
+                            )}
+                          `}
+                    `;
+                  }
+                  return '';
+                })()}
+              </div>
+            `}
       </div>
     `;
   }
 }
 
-declare global {
-  interface HTMLElementTagNameMap {
-    'outline-yext-universal': OutlineYextUniversal;
-  }
-}
+// Register web component
+customElements.define('outline-yext-universal', OutlineYextUniversal);

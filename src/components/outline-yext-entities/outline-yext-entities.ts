@@ -334,25 +334,25 @@ export class OutlineYextEntities extends LitElement {
     return html`
       ${data.response.entities.map(
         (entity: YextEntity) => html`
-        <div class="space-between-teasers">
-          <outline-teaser
-            image="${this.getEntityImage(entity)}"
-            title="${entity.name ?? 'Unnamed Entity'}"
-            subtitle="${this.getSubtitle(entity)}"
-            url="${this.getEntityUrl(entity)}"
-            phone="${entity.mainPhone || ''}"
-            fax="${entity.fax || ''}"
-            directions-url="${entity.googleMapUrl || ''}"
-            hours="${this.formatHours(entity.hours as Hours)}"
-            .noImageFallback=${true}
-          >
-            <div slot="address">
-              ${entity.address?.line1 || ''}<br />
-              ${entity.address?.city || ''}, ${entity.address?.region || ''}
-              ${entity.address?.postalCode || ''}
-            </div>
-          </outline-teaser>
-        </div>
+          <div class="space-between-teasers">
+            <outline-teaser
+              image="${this.getEntityImage(entity)}"
+              title="${entity.name ?? 'Unnamed Entity'}"
+              subtitle="${this.getSubtitle(entity)}"
+              url="${this.getEntityUrl(entity)}"
+              phone="${entity.mainPhone || ''}"
+              fax="${entity.fax || ''}"
+              directions-url="${entity.googleMapUrl || ''}"
+              hours="${this.formatHours(entity.hours as Hours)}"
+              .noImageFallback=${true}
+            >
+              <div slot="address">
+                ${entity.address?.line1 || ''}<br />
+                ${entity.address?.city || ''}, ${entity.address?.region || ''}
+                ${entity.address?.postalCode || ''}
+              </div>
+            </outline-teaser>
+          </div>
         `
       )}
     `;
@@ -360,9 +360,11 @@ export class OutlineYextEntities extends LitElement {
   private getSubtitle(entity: YextEntity): string {
     const entityType = this.entityTypes[this.currentEntityType].id;
     if (entityType === 'healthcareProfessional') {
-      return (Array.isArray(entity.c_specialties)
-        ? entity.c_specialties.join(', ')
-        : entity.c_specialties || '').toString();
+      return (
+        Array.isArray(entity.c_specialties)
+          ? entity.c_specialties.join(', ')
+          : entity.c_specialties || ''
+      ).toString();
     }
     return '';
   }

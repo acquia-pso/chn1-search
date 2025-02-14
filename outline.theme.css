@@ -30,6 +30,9 @@
   --status-error: #c53030;
   --status-info: #1e3a8a;
 
+  /* Colors for Generative Search*/
+  --generative-search-gradient: #e9f3ea;
+
   /* Demo colors used for default component demonstrations */
   --outline-phase2-blue: #0080ff;
   --outline-karma-coral: #fa5c5c;
