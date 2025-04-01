@@ -258,6 +258,7 @@ export class OutlineYextUniversal
   private handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       e.preventDefault();
+      this.isSearching = true
       if (this.suggestionTimeout) {
         clearTimeout(this.suggestionTimeout);
         this.suggestionTimeout = null;
