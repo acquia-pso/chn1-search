@@ -138,6 +138,17 @@ export interface YextVerticalResponse {
   };
 }
 
+export interface YextGenerateAnswerResponse {
+  meta: {
+    uuid: string;
+  };
+  response: {
+    directAnswer: string;
+    resultStatus: string;
+    citations: string[];
+  };
+}
+
 /**
  * Yext API Service
  */
@@ -280,6 +291,77 @@ export class YextAPI {
 
     const data = await response.json();
     return data.verticals || [];
+  }
+
+  /**
+   * Generate an AI answer for the given query
+   */
+  async generateAnswer(
+    query: string,
+    searchId: string,
+    results: YextUniversalSearchResponse['response']
+  ): Promise<YextGenerateAnswerResponse | null> {
+    const params = new URLSearchParams({
+      api_key: yextConfig.apiKey,
+      v: yextConfig.apiVersion,
+      experienceKey: 'universal-search',
+      locale: 'en',
+      version: 'PRODUCTION',
+    });
+
+    const requestBody = {
+      searchId,
+      searchTerm: query,
+      results,
+    };
+
+    const url = `${this.baseUrl}/search/generateAnswer?${params.toString()}`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      // Handle specific HTTP status codes
+      if (response.status === 404) {
+        console.warn('Generate Answer endpoint not available');
+        return null;
+      }
+
+      if (response.status === 429) {
+        console.warn('Rate limit exceeded for Generate Answer API');
+        return null;
+      }
+
+      if (!response.ok) {
+        // Try to get more detailed error information from the response
+        try {
+          const errorData = await response.json();
+          console.warn('Generate Answer API error:', errorData);
+        } catch (e) {
+          // If we can't parse the error response, just log the status
+          console.warn(`Generate Answer API error: ${response.status} ${response.statusText}`);
+        }
+        return null;
+      }
+
+      const data = await response.json();
+
+      // Check if the response has the expected structure
+      if (!data.response?.directAnswer || !data.response?.resultStatus) {
+        console.warn('Invalid response format from Generate Answer API');
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.warn('Failed to generate AI answer:', error);
+      return null;
+    }
   }
 }
 

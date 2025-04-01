@@ -2762,6 +2762,7 @@ __metadata:
     eslint-plugin-storybook: "npm:^0.8.0"
     glob: "npm:^10.3.10"
     lit: "npm:^3.1.2"
+    marked: "npm:^15.0.7"
     npm-run-all: "npm:^4.1.5"
     playwright: "npm:^1.50.1"
     postcss: "npm:^8.4.38"
@@ -8024,6 +8025,15 @@ __metadata:
   peerDependencies:
     react: ">= 0.14.0"
   checksum: 10c0/191b9a9defeed02e12dd340cebf279f577266dac7b34574fa44ce4d64ee8536f9967d455b8303c853f84413feb473118290a6160d8221eeaf3b9e4961b8980e3
+  languageName: node
+  linkType: hard
+
+"marked@npm:^15.0.7":
+  version: 15.0.7
+  resolution: "marked@npm:15.0.7"
+  bin:
+    marked: bin/marked.js
+  checksum: 10c0/0b9d07bace37bbf0548bae356c4184765afa4d2296ed0be4418aa4bb0ce703f323dc1a475125d536581f9fe264797e6265dd0b57499d97c0fe0f29bc6d016343
   languageName: node
   linkType: hard
 

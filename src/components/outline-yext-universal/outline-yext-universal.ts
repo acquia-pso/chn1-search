@@ -1,4 +1,5 @@
 import { LitElement, html, unsafeCSS } from 'lit';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { state } from 'lit/decorators.js';
 import {
   yextStore,
@@ -9,13 +10,14 @@ import { type YextSuggestion } from '../../libraries/data-access-yext/yext-types
 import {
   yextAPI,
   type YextResult,
-  type YextUniversalSearchResponse,
+  type YextVerticalResults,
 } from '../../libraries/data-access-yext/yext-api';
 import { displayTeaser } from '../outline-yext-vertical/teaser';
 import '../outline-yext-vertical/outline-yext-vertical';
 import '../shared/outline-teaser/outline-teaser';
 import { NoResultsMessage } from '../../libraries/ui-yext/no-results-message';
 import componentStyles from './outline-yext-universal.css?inline';
+import { marked } from 'marked';
 
 function debounce<T extends (arg: string) => void>(
   func: T,
@@ -48,6 +50,42 @@ interface MatchedSubstring {
   length: number;
 }
 
+interface YextUniversalSearchResponse {
+  meta: {
+    uuid: string;
+    errors: Error[];
+  };
+  response: {
+    businessId: string;
+    queryId: string;
+    modules: YextVerticalResults[];
+    failedVerticals?: Array<{
+      verticalConfigId: string;
+      errorType: string;
+      details: {
+        responseCode: number;
+        description: string;
+      };
+      queryDurationMillis: number;
+    }>;
+    spellCheck?: {
+      originalQuery: string;
+      correctedQuery: {
+        value: string;
+        matchedSubstrings: MatchedSubstring[];
+      };
+      type: string;
+    };
+    error?: {
+      errorType: string;
+      details?: {
+        responseCode: number;
+        description: string;
+      };
+    };
+  };
+}
+
 /**
  * Universal search component that provides cross-vertical search functionality
  * Implements accessibility features and clean state management
@@ -69,6 +107,9 @@ export class OutlineYextUniversal
   @state() private error: string | null = null;
   @state() private isSearching = false;
   @state() private hasSearched = false;
+  @state() private aiAnswer: string | null = null;
+  @state() private isLoadingAI = false;
+  @state() private aiError: string | null = null;
   private needsScrollAndFocus = false;
 
   private suggestionTimeout: number | null = null;
@@ -236,28 +277,31 @@ export class OutlineYextUniversal
     this.isLoading = true;
     this.error = null;
     this.hasSearched = true;
+    this.aiAnswer = null;
+    this.aiError = null;
+    this.isLoadingAI = true;
+
 
     try {
       const input = settings.input || '';
+      
+      // First get universal search results
       const response = await yextAPI.universalSearch(input);
 
-      // Check for timeout error - handle both possible response structures
-      if (
-        'error' in response.response &&
-        response.response.error?.errorType === 'TIMEOUT'
-      ) {
+      // Check for timeout error using type assertion
+      if ('error' in response.response && (response.response as any).error?.errorType === 'TIMEOUT') {
         console.warn('Search timeout detected');
         this.universalResponse = null;
         this.verticals = [];
         this.verticalCounts = new Map();
+        this.isLoading = false;
         return NoResultsMessage();
       }
 
+      // Update universal results immediately
       this.universalResponse = response.response;
 
-      const availableVerticals = response.response.modules.map(
-        module => module.verticalConfigId
-      );
+      this.verticals = response.response.modules.map(module => module.verticalConfigId);
 
       this.verticalCounts = new Map(
         response.response.modules.map(module => [
@@ -266,7 +310,8 @@ export class OutlineYextUniversal
         ])
       );
 
-      this.verticals = availableVerticals;
+      this.isLoading = false;
+      // Handle vertical-specific results if needed
 
       if (settings.vertical && settings.vertical !== 'all') {
         if (!this.verticalComponent) {
@@ -290,12 +335,32 @@ export class OutlineYextUniversal
           this.verticalComponent = null;
         }
       }
+
+      // Generate AI answer asynchronously
+      yextAPI.generateAnswer(
+        input,
+        response.meta.uuid,
+        response.response
+      ).then(aiResponse => {
+        if (aiResponse) {
+          const answer = aiResponse.response.directAnswer;
+          this.aiAnswer = typeof answer === 'string' ? answer : null;
+        } else {
+          this.aiError = 'AI-powered summary is not available at the moment.';
+        }
+        this.isLoadingAI = false;
+      }).catch(error => {
+        console.error('AI answer generation failed:', error);
+        this.aiError = 'Failed to generate AI summary.';
+        this.isLoadingAI = false;
+      });
+
     } catch (error) {
       console.error('Search failed:', error);
       this.error = 'Search failed. Please try again.';
       this.universalResponse = null;
-    } finally {
       this.isLoading = false;
+      this.isLoadingAI = false;
     }
   }
 
@@ -480,6 +545,45 @@ export class OutlineYextUniversal
       }
     }, 200);
   }
+  private renderAIAnswer() {
+    if (this.isLoadingAI) {
+      return html`
+        <div class="ai-loading">
+          <div class="ai-loading-lines">
+            <div class="line"></div>
+            <div class="line"></div>
+            <div class="line"></div>
+          </div>
+        </div>
+      `;
+    }
+
+    if (this.aiError) {
+      return html`<div class="ai-error-message">${this.aiError}</div>`;
+    }
+
+    if (this.aiAnswer && typeof this.aiAnswer === 'string') {
+      // Configure marked options
+      marked.setOptions({
+        gfm: true, // GitHub Flavored Markdown
+        breaks: true // Convert line breaks to <br>
+      });
+
+      try {
+        // Convert markdown to HTML using DOMPurify to sanitize the output
+        const htmlContent = marked.parse(this.aiAnswer, {
+          async: false
+        }) as string;
+
+        return html`<div class="ai-answer-text">${unsafeHTML(htmlContent)}</div>`;
+      } catch (error) {
+        console.error('Failed to parse markdown:', error);
+        return html`<div class="ai-error-message">Failed to format the response.</div>`;
+      }
+    }
+
+    return '';
+  }
 
   render() {
     return html`
@@ -539,7 +643,14 @@ export class OutlineYextUniversal
                 `
               : ''}
           </div>
-
+          ${this.hasSearched && this.searchValue
+            ? html`
+                <div class="ai-answer-container" role="complementary">
+                  <h2 class="ai-answer-title">AI Summary</h2>
+                  ${this.renderAIAnswer()}
+                </div>
+              `
+            : ''}
           ${this.verticals.length > 0
             ? html`
                 <div class="verticals-container" role="tablist">
