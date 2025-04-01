@@ -22,6 +22,6 @@
     "useDefineForClassFields": false,
     "esModuleInterop": true
   },
-  "include": ["src/**/*.ts", "src/components/index.ts.del"],
+  "include": ["src/**/*.ts", "src/components/index.ts.del", "tests/generative-search-vertials.test.ts"],
   "exclude": ["node_modules"]
 }

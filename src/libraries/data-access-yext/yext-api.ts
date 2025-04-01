@@ -7,6 +7,7 @@ export interface YextResult {
   id: string;
   name: string;
   type: string;
+  entityType?: string;
   description?: string;
   data: {
     c_url?: string;
@@ -148,6 +149,48 @@ export interface YextGenerateAnswerResponse {
     citations: string[];
   };
 }
+
+export interface YextCitationResponse {
+  meta: {
+    uuid: string;
+    errors: Error[];
+  };
+  response: {
+    docs: Array<{
+      $key: {
+        locale: string;
+        primary_key: string;
+      };
+      meta: {
+        entityType: {
+          id: string;
+          uid: number;
+        };
+      };
+      uid: number;
+      name: string;
+      description?: string;
+      c_content?: string;
+      url?: string;
+      c_url?: string;
+      landingPageUrl?: string;
+      websiteUrl?: {
+        url: string;
+      };
+    }>;
+    count: number;
+  };
+}
+
+interface FormattedCitation {
+  id: string;
+  title: string;
+  description?: string;
+  url?: string;
+  content?: string;
+  entityType?: string;
+}
+
 
 /**
  * Yext API Service
@@ -336,24 +379,26 @@ export class YextAPI {
         console.warn('Rate limit exceeded for Generate Answer API');
         return null;
       }
+      // Log the raw response
+      const responseText = await response.text();
 
-      if (!response.ok) {
-        // Try to get more detailed error information from the response
-        try {
-          const errorData = await response.json();
-          console.warn('Generate Answer API error:', errorData);
-        } catch (e) {
-          // If we can't parse the error response, just log the status
-          console.warn(`Generate Answer API error: ${response.status} ${response.statusText}`);
-        }
+      // Parse the response if it's JSON
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        console.warn('Failed to parse response as JSON:', e);
         return null;
       }
 
-      const data = await response.json();
+      if (!response.ok) {
+        console.warn('Generate Answer API error:', data);
+        return null;
+      }
 
-      // Check if the response has the expected structure
-      if (!data.response?.directAnswer || !data.response?.resultStatus) {
-        console.warn('Invalid response format from Generate Answer API');
+      // Validate response structure
+      if (!data.response?.directAnswer) {
+        console.warn('Invalid response format - missing directAnswer:', data);
         return null;
       }
 
@@ -362,6 +407,121 @@ export class YextAPI {
       console.warn('Failed to generate AI answer:', error);
       return null;
     }
+  }
+
+  /**
+   * Fetch citation content by ID from the content endpoint
+   */
+  async fetchCitationContent(
+    citationId: string
+  ): Promise<YextCitationResponse | null> {
+    const params = new URLSearchParams({
+      api_key: yextConfig.apiKey,
+      v: yextConfig.apiVersion,
+      uid: citationId,
+    });
+
+    const url = `${this.baseUrl}/content/gAEntities?${params.toString()}`;
+
+    try {
+      const response = await fetch(url);
+      const responseText = await response.text();
+
+      if (response.status === 403) {
+        console.warn('Access forbidden to content endpoint');
+        return null;
+      }
+
+      if (!response.ok) {
+        console.warn(
+          `Content API error: ${response.status} ${response.statusText}`
+        );
+        return null;
+      }
+
+      // Parse the response as JSON
+      try {
+        return JSON.parse(responseText);
+      } catch (e) {
+        console.warn('Failed to parse citation response as JSON');
+        return null;
+      }
+    } catch (error) {
+      console.warn('Failed to fetch citation content:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Enhanced generateAnswer method that also fetches citation content
+   */
+  async generateAnswerWithCitations(
+    query: string,
+    searchId: string,
+    results: YextUniversalSearchResponse['response']
+  ): Promise<{
+    answer: YextGenerateAnswerResponse | null;
+    citations: FormattedCitation[];
+  }> {
+    const answer = await this.generateAnswer(query, searchId, results);
+    const formattedCitations: FormattedCitation[] = [];
+
+    // Add entity type mapping
+    const entityTypeMap: { [key: string]: string } = {
+      healthcareProfessional: 'Healthcare Professional',
+      ce_location: 'Location',
+      ce_service: 'Health Service',
+      ce_procedure: 'Procedure',
+      ce_blog: 'Blog',
+      ce_careersArea: 'Career Area',
+      ce_careersPage: 'Careers Page',
+      ce_news: 'News',
+      ce_person: 'Person',
+      ce_personGroup: 'Person Group',
+      ce_pageServices: 'Other',
+      ce_testimonial: 'Testimonial',
+      ce_classesAndEvents: 'Classes and Events',
+      ce_educationResearch: 'Education and Research',
+    };
+
+    if (answer?.response?.citations) {
+      const citationPromises = answer.response.citations.map(citationId =>
+        this.fetchCitationContent(citationId)
+      );
+
+      try {
+        const citationResults = await Promise.all(citationPromises);
+
+        citationResults.forEach(citation => {
+          if (citation?.response.docs[0]) {
+            const doc = citation.response.docs[0];
+
+            const url = doc.c_url
+              ? `https://www.ecommunity.com${doc.c_url.startsWith('/') ? '' : '/'}${doc.c_url}`
+              : doc.websiteUrl?.url || undefined;
+
+            // Map the entity type or use original if not in map
+            // if not in the map use other?
+            const rawEntityType = doc.meta?.entityType?.id;
+            const mappedEntityType = rawEntityType
+              ? entityTypeMap[rawEntityType] || 'Other'
+              : 'Other';
+            formattedCitations.push({
+              id: doc.$key.primary_key,
+              title: doc.name,
+              description: doc.description,
+              url: url || undefined,
+              content: doc.c_content,
+              entityType: mappedEntityType,
+            });
+          }
+        });
+      } catch (error) {
+        console.error('Error fetching citations:', error);
+      }
+    }
+
+    return { answer, citations: formattedCitations };
   }
 }
 

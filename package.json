@@ -63,6 +63,7 @@
     "@phase2/outline-adopted-stylesheets-controller": "^1.0.4",
     "@phase2/outline-config": "^0.0.14",
     "@phase2/outline-core": "^0.2.7",
+    "dompurify": "^3.2.4",
     "lit": "^3.1.2",
     "marked": "^15.0.7"
   },

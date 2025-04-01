@@ -5,3 +5,4 @@ storybook-static/
 .yarn/unplugged/
 test-results/
 playwright-report/
+src/libraries/data-access-yext/api-config.ts
