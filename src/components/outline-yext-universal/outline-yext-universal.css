@@ -697,6 +697,10 @@ mark {
   padding: 0;
 }
 
+.sources-trigger:hover {
+  text-decoration: underline;
+}
+
 /* Lock main content when modal is open */
 :host([sources-panel-open]) .search-container {
   position: fixed;
