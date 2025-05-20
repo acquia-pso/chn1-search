@@ -1,4 +1,5 @@
 import { LitElement, html, unsafeCSS } from 'lit';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { state } from 'lit/decorators.js';
 import {
   yextStore,
@@ -9,13 +10,16 @@ import { type YextSuggestion } from '../../libraries/data-access-yext/yext-types
 import {
   yextAPI,
   type YextResult,
-  type YextUniversalSearchResponse,
+  type YextVerticalResults,
 } from '../../libraries/data-access-yext/yext-api';
 import { displayTeaser } from '../outline-yext-vertical/teaser';
 import '../outline-yext-vertical/outline-yext-vertical';
 import '../shared/outline-teaser/outline-teaser';
 import { NoResultsMessage } from '../../libraries/ui-yext/no-results-message';
 import componentStyles from './outline-yext-universal.css?inline';
+import { marked } from 'marked';
+import aiSparkle from '../../assets/ai-sparkle.svg';
+import DOMPurify from 'dompurify';
 
 function debounce<T extends (arg: string) => void>(
   func: T,
@@ -48,6 +52,60 @@ interface MatchedSubstring {
   length: number;
 }
 
+interface YextUniversalSearchResponse {
+  meta: {
+    uuid: string;
+    errors: Error[];
+  };
+  response: {
+    businessId: string;
+    queryId: string;
+    modules: YextVerticalResults[];
+    failedVerticals?: Array<{
+      verticalConfigId: string;
+      errorType: string;
+      details: {
+        responseCode: number;
+        description: string;
+      };
+      queryDurationMillis: number;
+    }>;
+    spellCheck?: {
+      originalQuery: string;
+      correctedQuery: {
+        value: string;
+        matchedSubstrings: MatchedSubstring[];
+      };
+      type: string;
+    };
+    error?: {
+      errorType: string;
+      details?: {
+        responseCode: number;
+        description: string;
+      };
+    };
+  };
+}
+
+interface FormattedCitation {
+  title: string;
+  url?: string;
+  description?: string;
+  entityType?: string;
+}
+
+interface YextResponseWithError {
+  error?: {
+    errorType: string;
+    details?: {
+      responseCode: number;
+      description: string;
+    };
+  };
+}
+
+
 /**
  * Universal search component that provides cross-vertical search functionality
  * Implements accessibility features and clean state management
@@ -69,12 +127,25 @@ export class OutlineYextUniversal
   @state() private error: string | null = null;
   @state() private isSearching = false;
   @state() private hasSearched = false;
+  @state() private aiAnswer: string | null = null;
+  @state() private isLoadingAI = false;
+  @state() private aiError: string | null = null;
+  @state() private citations: FormattedCitation[] = [];
   private needsScrollAndFocus = false;
+  @state() private showSourcesPanel = false;
+  @state() private showAIAnswer = true;
+  @state() private forceRunAI = false;
 
   private suggestionTimeout: number | null = null;
   private verticalComponent: OutlineYextVerticalElement | null = null;
   private readonly debouncedHandleInput: (value: string) => void;
+
   private searchInputRef: HTMLInputElement | null = null;
+  @state() private currentSearchId: string | null = null;
+
+  @state() private verticalClicked = false;
+
+  private touchStartX: number | null = null;
 
   static styles = unsafeCSS(componentStyles);
 
@@ -86,6 +157,8 @@ export class OutlineYextUniversal
   connectedCallback(): void {
     super.connectedCallback();
     yextStore.subscribe(this);
+    document.addEventListener('keydown', this.handleEscapeKey);
+    window.addEventListener('popstate', this.handlePopState);
   }
 
   firstUpdated(): void {
@@ -101,16 +174,19 @@ export class OutlineYextUniversal
     if (this.suggestionTimeout) {
       clearTimeout(this.suggestionTimeout);
     }
-    // Remove click event listener
+    document.removeEventListener('keydown', this.handleEscapeKey);
     document.removeEventListener('click', this.handleClickOutside.bind(this));
+    window.removeEventListener('popstate', this.handlePopState);
+
   }
 
   async onStateChange(settings: SearchSettings): Promise<void> {
     this.searchValue = settings.input || '';
-    this.currentVertical = settings.vertical || 'all';
+    const newVertical = settings.vertical || 'all';
 
     if (settings.input) {
       await this.performSearch(settings);
+      this.currentVertical = newVertical;
 
       // After search completes, check if we need to scroll and focus
       if (this.needsScrollAndFocus) {
@@ -139,6 +215,8 @@ export class OutlineYextUniversal
       }
     } else {
       this.clearResults();
+      this.currentVertical = newVertical;
+
     }
   }
 
@@ -180,19 +258,22 @@ export class OutlineYextUniversal
   private handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       e.preventDefault();
-      // Cancel any pending suggestion requests
+      this.isSearching = true
       if (this.suggestionTimeout) {
         clearTimeout(this.suggestionTimeout);
         this.suggestionTimeout = null;
       }
-      // Clear suggestions immediately
       this.showSuggestions = false;
       this.currentSuggestions = [];
-      // Update search value from input directly to ensure it's current
       const input = e.target as HTMLInputElement;
       this.searchValue = input.value;
-      // Trigger search immediately
-      this.handleSearch();
+      this.forceRunAI = true;
+
+      yextStore.updateSettings({
+        input: this.searchValue,
+        vertical: 'all',
+        page: 1
+      });
     } else if (e.key === 'ArrowDown' && this.currentSuggestions.length > 0) {
       e.preventDefault();
       const firstSuggestion = this.shadowRoot?.querySelector(
@@ -205,7 +286,6 @@ export class OutlineYextUniversal
   }
 
   private handleSearch() {
-    // Cancel any pending suggestion requests
     if (this.suggestionTimeout) {
       clearTimeout(this.suggestionTimeout);
       this.suggestionTimeout = null;
@@ -214,10 +294,12 @@ export class OutlineYextUniversal
     this.currentSuggestions = [];
     this.isSearching = true;
     this.hasSearched = true;
+    this.forceRunAI = true;
+
     yextStore.updateSettings({
       input: this.searchValue,
-      vertical: 'all',
-      page: 1,
+      vertical: this.currentVertical,
+      page: 1
     });
   }
 
@@ -233,31 +315,48 @@ export class OutlineYextUniversal
   }
 
   private async performSearch(settings: SearchSettings) {
-    this.isLoading = true;
     this.error = null;
+     // Skip AI if:
+    // 1. Not a forced search (button/enter) AND
+    // 2. Either skipAI is set, vertical was clicked, OR page number changed
+    const skipAI = !this.forceRunAI && (
+      settings.skipAI || 
+      this.verticalClicked || 
+      (settings.page && settings.page > 1)
+    );
+
+    this.verticalClicked = false;
     this.hasSearched = true;
+    this.forceRunAI = false;
+
+    if (!skipAI) {
+      this.isLoading = true;
+      this.aiAnswer = null;
+      this.aiError = null;
+      this.isLoadingAI = true;
+    }
+
 
     try {
-      const input = settings.input || '';
-      const response = await yextAPI.universalSearch(input);
+      const response = await yextAPI.universalSearch(settings.input);
 
-      // Check for timeout error - handle both possible response structures
-      if (
-        'error' in response.response &&
-        response.response.error?.errorType === 'TIMEOUT'
-      ) {
-        console.warn('Search timeout detected');
-        this.universalResponse = null;
-        this.verticals = [];
-        this.verticalCounts = new Map();
-        return NoResultsMessage();
+      // Check for timeout error using type assertion
+      if ('error' in response.response) {
+        const responseWithError = response.response as YextResponseWithError;
+        if (responseWithError.error?.errorType === 'TIMEOUT') {
+          console.warn('Search timeout detected');
+          this.universalResponse = null;
+          this.verticals = [];
+          this.verticalCounts = new Map();
+          this.isLoading = false;
+          return NoResultsMessage();
+        }
       }
 
+      // Update universal results immediately
       this.universalResponse = response.response;
 
-      const availableVerticals = response.response.modules.map(
-        module => module.verticalConfigId
-      );
+      this.verticals = response.response.modules.map(module => module.verticalConfigId);
 
       this.verticalCounts = new Map(
         response.response.modules.map(module => [
@@ -266,7 +365,8 @@ export class OutlineYextUniversal
         ])
       );
 
-      this.verticals = availableVerticals;
+      this.isLoading = false;
+      // Handle vertical-specific results if needed
 
       if (settings.vertical && settings.vertical !== 'all') {
         if (!this.verticalComponent) {
@@ -279,7 +379,7 @@ export class OutlineYextUniversal
         }
 
         await this.verticalComponent.updateResults(
-          input,
+          settings.input,
           settings.vertical,
           settings.page || 1,
           settings.limit || 16
@@ -290,12 +390,40 @@ export class OutlineYextUniversal
           this.verticalComponent = null;
         }
       }
+      if (!skipAI) {
+        const searchId = response.meta.uuid;
+        this.currentSearchId = searchId;
+
+        // Generate AI answer asynchronously
+        yextAPI.generateAnswerWithCitations(
+          settings.input,
+          response.meta.uuid,
+          response.response
+        ).then(aiResponse => {
+          // Only update state if this is still the current search
+          if (this.currentSearchId === searchId) {
+            if (aiResponse?.answer) {
+              this.aiAnswer = aiResponse.answer.response.directAnswer;
+              this.citations = aiResponse.citations || [];
+            } else {
+              this.aiError = `We're sorry, we could not generate any results. Please modify your search and try again.`;
+            }
+            this.isLoadingAI = false;
+          }
+        }).catch(error => {
+          if (this.currentSearchId === searchId) {
+            console.error('AI answer generation failed:', error);
+            this.aiError = `We're sorry, we could not generate any results. Please modify your search and try again.`;
+            this.isLoadingAI = false;
+          }
+        });
+      }
     } catch (error) {
       console.error('Search failed:', error);
-      this.error = 'Search failed. Please try again.';
+      this.error = `We're sorry, we could not generate any results. Please modify your search and try again.`      
       this.universalResponse = null;
-    } finally {
       this.isLoading = false;
+      this.isLoadingAI = false;
     }
   }
 
@@ -480,10 +608,191 @@ export class OutlineYextUniversal
       }
     }, 200);
   }
+  private renderAIAnswer() {
+    if (this.isLoadingAI) {
+      return html`
+        <div class="ai-loading">
+          <div class="ai-loading-lines">
+            <div class="line"></div>
+            <div class="line"></div>
+            <div class="line"></div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Only show error if we've actually performed a search
+    if (this.aiError && !this.aiAnswer && this.hasSearched) {
+      return html`<div class="ai-error-message">${this.aiError}</div>`;
+    }
+
+    if (this.aiAnswer && typeof this.aiAnswer === 'string') {
+      marked.setOptions({
+        gfm: true,
+        breaks: true
+      });
+
+      try {
+        // Convert markdown to HTML
+        const htmlContent = marked.parse(this.aiAnswer, {
+          async: false
+        }) as string;
+
+        // Sanitize the HTML output with default DOMPurify settings
+        const sanitizedHtml = DOMPurify.sanitize(htmlContent);
+
+        return html`
+          <div class="ai-container">
+            ${this.showAIAnswer ? html`
+              <div class="ai-content">
+                <div class="ai-answer-text">${unsafeHTML(sanitizedHtml)}</div>
+                <button 
+                  class="sources-trigger" 
+                  @click=${() => this.toggleSourcesPanel(true)}
+                >
+                  View Sources
+                </button>
+                <div class="sources-disclaimer">
+                  *Summary may be inaccurate; please click the source links below the summary to confirm the details.
+                </div>
+              </div>
+            ` : ''}
+            
+            <button 
+              class="toggle-summary" 
+              @click=${() => this.showAIAnswer = !this.showAIAnswer}
+            >
+              ${this.showAIAnswer ? 'Hide' : 'Show'} AI Summary
+            </button>
+          </div>
+        `;
+      } catch (error) {
+        console.error('Failed to parse markdown:', error);
+        return html`<div class="ai-error-message">Failed to format the response.</div>`;
+      }
+    }
+
+    return '';
+  }
+
+  private renderCitation(citation: FormattedCitation) {
+    return html`
+      <li class="citation-item">
+        ${citation.url 
+          ? html`
+            <a 
+              href="${citation.url}" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              @click=${(e: Event) => {
+                e.preventDefault();
+                window.open(citation.url, '_blank', 'noopener,noreferrer');
+              }}
+            >
+              <div class="citation-wrapper">
+                ${citation.entityType 
+                  ? html`<span class="citation-entity-type">${citation.entityType}</span>`
+                  : ''
+                }
+                <span class="citation-content">
+                  <span class="citation-title">${citation.title}</span>
+                  ${citation.description 
+                    ? html`<span class="citation-description">${citation.description}</span>`
+                    : ''
+                  }
+                </span>
+              </div>
+            </a>
+          `
+          : html`
+            <div class="citation-wrapper">
+              ${citation.entityType 
+                ? html`<span class="citation-entity-type">${citation.entityType}</span>`
+                : ''
+              }
+              <span class="citation-content">
+                <span class="citation-title">${citation.title}</span>
+                ${citation.description 
+                  ? html`<span class="citation-description">${citation.description}</span>`
+                  : ''
+                }
+              </span>
+            </div>
+          `
+        }
+      </li>
+    `;
+  }
+
+  private toggleSourcesPanel(show: boolean) {
+    const previouslyFocusedElement = document.activeElement as HTMLElement;
+    this.showSourcesPanel = show;
+
+    if (show) {
+      const mainContent = this.shadowRoot?.querySelector('.search-container') as HTMLElement;
+      mainContent?.setAttribute('inert', '');
+      this.setAttribute('sources-panel-open', '');
+      // Focus on the close button when panel opens
+      setTimeout(() => {
+        const closeButton = this.shadowRoot?.querySelector('.close-panel') as HTMLElement;
+        closeButton?.focus();
+      }, 100);
+      window.history.pushState({ sourcesOpen: true }, '');
+    } else {
+      const mainContent = this.shadowRoot?.querySelector('.search-container') as HTMLElement;
+      mainContent?.removeAttribute('inert');
+      this.removeAttribute('sources-panel-open');
+      // Restore focus to the element that had it before the panel was opened
+      if (previouslyFocusedElement) {
+        previouslyFocusedElement.focus();
+      }
+    }
+  }
+
+  private handleEscapeKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && this.showSourcesPanel) {
+      this.toggleSourcesPanel(false);
+    }
+  }
+
+  private handleOverlayClick = (e: MouseEvent) => {
+    if(window.innerWidth >= 768){
+      this.toggleSourcesPanel(false);
+    }
+  }
+
+  private handleTouchStart = (e: TouchEvent) => {
+    if(window.innerWidth < 768){
+      this.touchStartX = e.changedTouches[0].clientX;
+    }
+  }
+
+  private handleTouchEnd = (e: TouchEvent) => {
+    if (!this.touchStartX) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    if (touchEndX > this.touchStartX) { // Right swipe
+       this.toggleSourcesPanel(false);
+    }
+    this.touchStartX = 0;
+  }
+
+  private handlePopState = () => {
+    if (this.showSourcesPanel) {
+      this.toggleSourcesPanel(false);
+    }
+  }
 
   render() {
     return html`
-      <div class="search-container">
+    ${this.showSourcesPanel ? html`
+      <div 
+        class="overlay"
+        @click=${this.handleOverlayClick}
+        @touchstart=${this.handleTouchStart}
+        @touchend=${this.handleTouchEnd}
+      ></div>
+    ` : ''}
+      <div class="search-container">  
         <div class="search-section">
           <div class="search-input-group">
             <input
@@ -539,7 +848,24 @@ export class OutlineYextUniversal
                 `
               : ''}
           </div>
-
+          ${this.hasSearched && this.searchValue
+            ? html`
+                <div class="ai-answer-container" role="complementary">
+                  <div class="ai-answer-header-and-svg">
+                    <img
+                      src=${aiSparkle}
+                      alt="AI Sparkle SVG"
+                      width="22.58"
+                      height="24"
+                    />
+                    <h2 class="ai-answer-title">Summary*</h2>
+                  </div>
+                  <div class="ai-content">
+                    ${this.renderAIAnswer()}
+                  </div>
+                </div>
+              `
+            : ''}
           ${this.verticals.length > 0
             ? html`
                 <div class="verticals-container" role="tablist">
@@ -551,11 +877,13 @@ export class OutlineYextUniversal
                         : ''}"
                       role="tab"
                       aria-selected="${this.currentVertical === 'all'}"
-                      @click="${() =>
+                      @click="${() =>{
+                        this.verticalClicked = true;
                         yextStore.updateSettings({
                           vertical: 'all',
                           page: 1,
-                        })}"
+                        });
+                      }}"
                     >
                       All
                       (${this.universalResponse
@@ -571,8 +899,10 @@ export class OutlineYextUniversal
                             : ''}"
                           role="tab"
                           aria-selected="${this.currentVertical === vertical}"
-                          @click="${() =>
-                            yextStore.updateSettings({ vertical, page: 1 })}"
+                          @click="${() =>{
+                            this.verticalClicked = true;
+                            yextStore.updateSettings({ vertical, page: 1 });
+                        }}"
                         >
                           ${this.getVerticalDisplayName(vertical)}
                           (${this.verticalCounts.get(vertical) || 0})
@@ -667,6 +997,25 @@ export class OutlineYextUniversal
                 })()}
               </div>
             `}
+      </div>
+
+       <div 
+        class="sources-panel ${this.showSourcesPanel ? 'show' : ''}"
+        role="dialog"
+        aria-labelledby="sources-panel-title"
+        aria-modal="true"
+      >
+        <div class="sources-panel-header">
+          <h3 id="sources-panel-title">Sources</h3>
+          <button 
+            class="close-panel" 
+            @click=${() => this.toggleSourcesPanel(false)}
+            aria-label="Close sources panel"
+          >×</button>
+        </div>
+        <ul class="citations-list">
+          ${this.citations.length ? this.citations.map(this.renderCitation) : ''}
+        </ul>
       </div>
     `;
   }

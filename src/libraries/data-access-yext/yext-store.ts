@@ -11,6 +11,7 @@ export interface SearchSettings {
   facetFilters?: Record<string, unknown>;
   sortBys?: Array<{ type: string }>;
   retrieveFacets?: boolean;
+  skipAI?: boolean;
 }
 
 export interface StoreSubscriber {
@@ -39,6 +40,7 @@ export const defaultSearchSettings: SearchSettings = {
 export class YextStore {
   private subscribers: Set<StoreSubscriber> = new Set();
   private currentSettings: SearchSettings;
+  private previousSettings: SearchSettings | null = null;
 
   constructor() {
     this.currentSettings = this.getSettingsFromUrl();
@@ -68,6 +70,7 @@ export class YextStore {
    * @param settings - Partial settings to update
    */
   updateSettings(settings: Partial<SearchSettings>): void {
+    this.previousSettings = { ...this.currentSettings };
     // Reset page to 1 and clear offset when vertical changes
     if (
       settings.vertical &&
@@ -75,7 +78,9 @@ export class YextStore {
     ) {
       settings.page = 1;
       settings.offset = 0;
-    }
+      // Only skip AI if search terms haven't changed
+      settings.skipAI = settings.input === this.currentSettings.input;
+      }
 
     this.currentSettings = {
       ...this.currentSettings,
@@ -237,12 +242,19 @@ export class YextStore {
    */
   private setupHistoryListener(): void {
     window.addEventListener('popstate', event => {
-      // Try to get settings from state first
+      this.previousSettings = { ...this.currentSettings };
       if (event.state?.searchSettings) {
-        this.currentSettings = event.state.searchSettings;
+        this.currentSettings = {
+          ...event.state.searchSettings,
+          // Only set skipAI based on search term comparison
+          skipAI: this.previousSettings?.input === event.state.searchSettings.input
+        };
       } else {
-        // Fallback to parsing from URL if state is not available
-        this.currentSettings = this.getSettingsFromUrl();
+        const newSettings = this.getSettingsFromUrl();
+        this.currentSettings = {
+          ...newSettings,
+          skipAI: this.previousSettings?.input === newSettings.input
+        };
       }
       this.notifySubscribers();
     });
