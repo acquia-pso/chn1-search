@@ -193,7 +193,7 @@ export function healthcareProfessionalTeaser(
       teaser-type="healthcare_professional"
       image="${image}"
       title="${title}"
-      url="${url}"
+      url="${url.replace(/\bfad\b/, "dev")}"
     >
       ${specialties.length > 0
         ? html`
@@ -219,7 +219,7 @@ export function healthcareProfessionalTeaser(
       <outline-button
         .isGenerative=${isGenerative}
         slot="cta"
-        button-url="${url}"
+        button-url="${url.replace(/\bfad\b/, "dev")}"
         button-title="Request Appointment"
       ></outline-button>
     </outline-teaser>
