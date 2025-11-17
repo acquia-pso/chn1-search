@@ -19,6 +19,37 @@ interface HighlightedField {
   }>;
 }
 
+/**
+ * Detects the current environment from window.location.hostname and replaces
+ * the URL prefix with the appropriate subdomain:
+ * - dev.ecommunity.com -> dev.ecommunity.com
+ * - stage.ecommunity.com -> stage.ecommunity.com
+ * - ecommunity.com -> ecommunity.com
+ * 
+ * URLs from Yext come as ecommunity.com in every environment, so we detect
+ * the current page's environment and return the appropriate prefix.
+ */
+function replaceEnvironmentPrefix(url: string): string {
+  try {
+    // Detect environment from current page's hostname
+    const currentHostname = typeof window !== 'undefined' ? window.location.hostname : '';
+    let targetPrefix = ''; // default to production
+    
+    if (currentHostname.includes('dev.ecommunity.com')) {
+      targetPrefix = 'dev.';
+    } else if (currentHostname.includes('stage.ecommunity.com')) {
+      targetPrefix = 'stage.';
+    } else if (currentHostname.includes('www.ecommunity.com')) {
+      targetPrefix = '';
+    }
+   
+    return url.replace(/\bfad\.\b/, targetPrefix);
+  }
+  catch (e) {
+    return url;
+  }
+}
+
 export function displayTeaser(result: YextResult, isGenerative?: boolean) {
   const highlightField = (field: string): string => {
     const fieldData = result.highlightedFields?.[field];
@@ -193,7 +224,7 @@ export function healthcareProfessionalTeaser(
       teaser-type="healthcare_professional"
       image="${image}"
       title="${title}"
-      url="${url.replace(/\bfad\b/, "dev")}"
+      url="${replaceEnvironmentPrefix(url)}"
     >
       ${specialties.length > 0
         ? html`
@@ -219,7 +250,7 @@ export function healthcareProfessionalTeaser(
       <outline-button
         .isGenerative=${isGenerative}
         slot="cta"
-        button-url="${url.replace(/\bfad\b/, "dev")}"
+        button-url="${replaceEnvironmentPrefix(url)}"
         button-title="Request Appointment"
       ></outline-button>
     </outline-teaser>
