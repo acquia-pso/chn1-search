@@ -320,8 +320,8 @@ export class OutlineYextUniversal
     // 1. Not a forced search (button/enter) AND
     // 2. Either skipAI is set, vertical was clicked, OR page number changed
     const skipAI = !this.forceRunAI && (
-      settings.skipAI || 
-      this.verticalClicked || 
+      settings.skipAI ||
+      this.verticalClicked ||
       (settings.page && settings.page > 1)
     );
 
@@ -420,7 +420,7 @@ export class OutlineYextUniversal
       }
     } catch (error) {
       console.error('Search failed:', error);
-      this.error = `We're sorry, we could not generate any results. Please modify your search and try again.`      
+      this.error = `We're sorry, we could not generate any results. Please modify your search and try again.`
       this.universalResponse = null;
       this.isLoading = false;
       this.isLoadingAI = false;
@@ -646,8 +646,8 @@ export class OutlineYextUniversal
             ${this.showAIAnswer ? html`
               <div class="ai-content">
                 <div class="ai-answer-text">${unsafeHTML(sanitizedHtml)}</div>
-                <button 
-                  class="sources-trigger" 
+                <button
+                  class="sources-trigger"
                   @click=${() => this.toggleSourcesPanel(true)}
                 >
                   View Sources
@@ -657,9 +657,9 @@ export class OutlineYextUniversal
                 </div>
               </div>
             ` : ''}
-            
-            <button 
-              class="toggle-summary" 
+
+            <button
+              class="toggle-summary"
               @click=${() => this.showAIAnswer = !this.showAIAnswer}
             >
               ${this.showAIAnswer ? 'Hide' : 'Show'} AI Summary
@@ -678,11 +678,11 @@ export class OutlineYextUniversal
   private renderCitation(citation: FormattedCitation) {
     return html`
       <li class="citation-item">
-        ${citation.url 
+        ${citation.url
           ? html`
-            <a 
-              href="${citation.url}" 
-              target="_blank" 
+            <a
+              href="${citation.url}"
+              target="_blank"
               rel="noopener noreferrer"
               @click=${(e: Event) => {
                 e.preventDefault();
@@ -690,13 +690,13 @@ export class OutlineYextUniversal
               }}
             >
               <div class="citation-wrapper">
-                ${citation.entityType 
+                ${citation.entityType
                   ? html`<span class="citation-entity-type">${citation.entityType}</span>`
                   : ''
                 }
                 <span class="citation-content">
                   <span class="citation-title">${citation.title}</span>
-                  ${citation.description 
+                  ${citation.description
                     ? html`<span class="citation-description">${citation.description}</span>`
                     : ''
                   }
@@ -706,13 +706,13 @@ export class OutlineYextUniversal
           `
           : html`
             <div class="citation-wrapper">
-              ${citation.entityType 
+              ${citation.entityType
                 ? html`<span class="citation-entity-type">${citation.entityType}</span>`
                 : ''
               }
               <span class="citation-content">
                 <span class="citation-title">${citation.title}</span>
-                ${citation.description 
+                ${citation.description
                   ? html`<span class="citation-description">${citation.description}</span>`
                   : ''
                 }
@@ -785,14 +785,14 @@ export class OutlineYextUniversal
   render() {
     return html`
     ${this.showSourcesPanel ? html`
-      <div 
+      <div
         class="overlay"
         @click=${this.handleOverlayClick}
         @touchstart=${this.handleTouchStart}
         @touchend=${this.handleTouchEnd}
       ></div>
     ` : ''}
-      <div class="search-container">  
+      <div class="search-container">
         <div class="search-section">
           <div class="search-input-group">
             <input
@@ -848,7 +848,7 @@ export class OutlineYextUniversal
                 `
               : ''}
           </div>
-          ${this.hasSearched && this.searchValue
+          ${false && this.hasSearched && this.searchValue
             ? html`
                 <div class="ai-answer-container" role="complementary">
                   <div class="ai-answer-header-and-svg">
@@ -999,7 +999,7 @@ export class OutlineYextUniversal
             `}
       </div>
 
-       <div 
+       <div
         class="sources-panel ${this.showSourcesPanel ? 'show' : ''}"
         role="dialog"
         aria-labelledby="sources-panel-title"
@@ -1007,8 +1007,8 @@ export class OutlineYextUniversal
       >
         <div class="sources-panel-header">
           <h3 id="sources-panel-title">Sources</h3>
-          <button 
-            class="close-panel" 
+          <button
+            class="close-panel"
             @click=${() => this.toggleSourcesPanel(false)}
             aria-label="Close sources panel"
           >×</button>
